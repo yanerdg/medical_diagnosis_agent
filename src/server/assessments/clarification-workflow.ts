@@ -140,6 +140,18 @@ export function submitClarificationResponses(params: {
       createdAt: submittedAt,
     }),
   );
+  const resolvedConflictIds = responses.flatMap((response) => {
+    const conflictId = conflictIdFromQuestionId(response.question_id);
+    if (!conflictId) return [];
+    const resolved = repository.resolveClinicalConflict({
+      conflict_id: conflictId,
+      resolution: response.marked_unknown
+        ? "acknowledged_unknown"
+        : "clinician_confirmed",
+      resolved_at: submittedAt,
+    });
+    return resolved ? [resolved.conflict_id] : [];
+  });
 
   repository.recordAuditEvent({
     entity_type: "clarification_request",
@@ -152,6 +164,7 @@ export function submitClarificationResponses(params: {
       response_ids: responses.map((response) => response.response_id),
       supplemental_input_id: supplementalInput?.input_id ?? null,
       evidence,
+      resolved_conflict_ids: resolvedConflictIds,
     },
     created_at: submittedAt,
   });
@@ -164,6 +177,7 @@ export function submitClarificationResponses(params: {
       marked_unknown_count: responses.filter((response) => response.marked_unknown)
         .length,
       supplemental_input_id: supplementalInput?.input_id ?? null,
+      resolved_conflict_ids: resolvedConflictIds,
     },
     created_at: submittedAt,
   });
@@ -429,4 +443,9 @@ function responseToEvidence(params: {
 
 function missingEvidenceCodeFromQuestionId(questionId: string): string {
   return questionId.split(":")[0] ?? questionId;
+}
+
+function conflictIdFromQuestionId(questionId: string): string | undefined {
+  const code = missingEvidenceCodeFromQuestionId(questionId);
+  return code.startsWith("conflict.") ? code.slice("conflict.".length) : undefined;
 }

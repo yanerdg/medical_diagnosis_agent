@@ -373,7 +373,7 @@ export class MedicalRepository {
         .run(params.case_id, ...(params.structure_id ? [params.structure_id] : []));
 
       const statement = this.database.prepare(
-        `INSERT INTO clinical_conflicts (
+        `INSERT OR IGNORE INTO clinical_conflicts (
           conflict_id, case_id, structure_id, category, severity, field,
           left_evidence_ids_json, right_evidence_ids_json, description, resolution,
           blocks_json, created_at, resolved_at
@@ -417,6 +417,25 @@ export class MedicalRepository {
       )
       .all(caseId) as ConflictItemRow[];
     return rows.map(toConflictItem);
+  }
+
+  resolveClinicalConflict(params: {
+    conflict_id: string;
+    resolution: "clinician_confirmed" | "acknowledged_unknown";
+    resolved_at: string;
+  }): ConflictItem | null {
+    this.database
+      .prepare(
+        `UPDATE clinical_conflicts
+         SET resolution = ?, resolved_at = ?
+         WHERE conflict_id = ? AND resolution = 'unresolved'`,
+      )
+      .run(params.resolution, params.resolved_at, params.conflict_id);
+
+    const row = this.database
+      .prepare("SELECT * FROM clinical_conflicts WHERE conflict_id = ?")
+      .get(params.conflict_id) as ConflictItemRow | undefined;
+    return row ? toConflictItem(row) : null;
   }
 
   saveSpecialtyStructure(structure: SpecialtyStructure): SpecialtyStructure {

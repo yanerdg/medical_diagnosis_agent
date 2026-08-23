@@ -12,6 +12,7 @@ export function detectStructureConflicts(params: {
 
   if (structure.pathology.status !== "confirmed" && structure.pathology.pathology_type) {
     conflicts.push({
+      conflict_id: `${structure.structure_id}:pathology-status`,
       case_id,
       structure_id: structure.structure_id,
       category: "fact",
@@ -32,6 +33,7 @@ export function detectStructureConflicts(params: {
     /鼻咽|nasophary/i.test(primarySite)
   ) {
     conflicts.push({
+      conflict_id: `${structure.structure_id}:cancer-site-ct-primary`,
       case_id,
       structure_id: structure.structure_id,
       category: "cross_modality",

@@ -90,7 +90,7 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(4);
+    ).toHaveLength(5);
     expect(events.map((event) => event.sequence)).toEqual(
       events.map((_, index) => index + 1),
     );
@@ -123,6 +123,41 @@ describe("assessment agent graph", () => {
       repository
         .listRunEvents(result.run.run_id)
         .some((event) => event.event_type === "assessment.clarification.interrupted"),
+    ).toBe(true);
+  });
+
+  it("turns a blocking persisted conflict into a clinician clarification", async () => {
+    const structure = missingPathologyStructure(
+      "case-conflict",
+      "structure-conflict",
+    );
+    structure.pathology.pathology_type = "鳞状细胞癌";
+    structure.pathology.evidence_ids = ["e-pathology-text"];
+    saveCaseWithStructure(
+      "case-conflict",
+      structure,
+      "病理状态未确认，但既往文本记载鳞状细胞癌。",
+    );
+
+    const result = await runAssessmentGraph({
+      case_id: "case-conflict",
+      repository,
+      now: () => timestamp,
+    });
+
+    expect(result.run.status).toBe("paused_for_clinician_input");
+    expect(result.clarification_request?.questions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: expect.stringMatching(/^conflict\./),
+          blocks_conclusion: true,
+        }),
+      ]),
+    );
+    expect(
+      repository
+        .listRunEvents(result.run.run_id)
+        .some((event) => event.event_type === "assessment.conflict.checked"),
     ).toBe(true);
   });
 

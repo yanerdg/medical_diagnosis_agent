@@ -11,7 +11,7 @@ import {
   getMedicalRepository,
   type MedicalRepository,
 } from "@/server/repositories";
-import { ClinicalContextManager } from "@/server/context";
+import { ClinicalContextManager, type ConflictItem } from "@/server/context";
 import {
   Annotation,
   Command,
@@ -113,6 +113,10 @@ export function createAssessmentGraph(
       missing_evidence_check: {
         name: "missing_evidence_check",
         invoke: (state) => missingEvidenceCheckNode(state, runtime),
+      },
+      conflict_check: {
+        name: "conflict_check",
+        invoke: (state) => conflictCheckNode(state, runtime),
       },
       clarification_gate: {
         name: "clarification_gate",
@@ -338,11 +342,13 @@ function createDurableAssessmentGraph(
     .addNode("intake_validation", invoke("intake_validation"))
     .addNode("pathology_gate", invoke("pathology_gate"))
     .addNode("missing_evidence_check", invoke("missing_evidence_check"))
+    .addNode("conflict_check", invoke("conflict_check"))
     .addNode("clarification_gate", invoke("clarification_gate"))
     .addEdge(START, "intake_validation")
     .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("missing_evidence_check", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("conflict_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("clarification_gate", (state) => routeDurableNext(state.assessment.next))
     .compile({ checkpointer: createAssessmentCheckpointer(checkpointPath) });
 }
@@ -531,7 +537,7 @@ async function missingEvidenceCheckNode(
 
   return {
     ...state,
-    next: "clarification_gate",
+    next: "conflict_check",
     missing_evidence: dedupeMissingEvidence([
       ...state.missing_evidence,
       ...labMissing,
@@ -543,6 +549,50 @@ async function missingEvidenceCheckNode(
       tnm_mapper: tnm,
       contradiction_checker: contradictions,
     },
+  };
+}
+
+async function conflictCheckNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure) {
+    return failState(state, "No specialty structure is available for conflict check");
+  }
+
+  const contextBundle = new ClinicalContextManager(runtime.repository).build({
+    case_id: state.case_id,
+    run_id: state.run_id,
+    structure: state.structure,
+    profile: "conflict_check",
+  });
+  const blockingConflicts = contextBundle.unresolved_conflicts.filter(
+    (conflict) =>
+      conflict.severity === "blocking" && conflict.blocks.includes("assessment"),
+  );
+  appendRunEvent(runtime.repository, state, "assessment.conflict.checked", {
+    unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
+    blocking_conflict_ids: blockingConflicts.map((conflict) => conflict.conflict_id),
+  });
+
+  return {
+    ...state,
+    context_bundle: contextBundle,
+    next: "clarification_gate",
+    missing_evidence: dedupeMissingEvidence([
+      ...state.missing_evidence,
+      ...blockingConflicts.map(conflictToMissingEvidence),
+    ]),
+  };
+}
+
+function conflictToMissingEvidence(conflict: ConflictItem): MissingEvidenceItem {
+  return {
+    code: `conflict.${conflict.conflict_id}`,
+    label: "证据冲突复核",
+    severity: "blocking",
+    question: `请医生裁决以下证据冲突：${conflict.description}`,
+    clinical_purpose: "阻断性证据冲突未裁决前，不得生成评估结论。",
   };
 }
 
@@ -967,6 +1017,7 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "intake_validation",
     "pathology_gate",
     "missing_evidence_check",
+    "conflict_check",
     "clarification_gate",
   ].includes(next);
 }

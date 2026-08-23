@@ -14,6 +14,7 @@ export type AssessmentNodeName =
   | "intake_validation"
   | "pathology_gate"
   | "missing_evidence_check"
+  | "conflict_check"
   | "clarification_gate";
 
 export type AssessmentGraphTerminal = "completed" | "paused" | "failed";

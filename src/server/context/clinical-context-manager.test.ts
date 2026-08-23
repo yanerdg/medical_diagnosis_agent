@@ -73,5 +73,19 @@ describe("ClinicalContextManager", () => {
     );
     expect(repository.listClinicalFacts(structure.case_id, structure.structure_id).length).toBeGreaterThan(0);
     expect(repository.listUnresolvedClinicalConflicts(structure.case_id)).toHaveLength(1);
+
+    const conflict = repository.listUnresolvedClinicalConflicts(structure.case_id)[0];
+    repository.resolveClinicalConflict({
+      conflict_id: conflict.conflict_id,
+      resolution: "clinician_confirmed",
+      resolved_at: "2026-08-23T00:00:00.000Z",
+    });
+    const rebuilt = new ClinicalContextManager(repository).build({
+      case_id: structure.case_id,
+      run_id: "run-resolved-conflict",
+      structure,
+      profile: "conflict_check",
+    });
+    expect(rebuilt.unresolved_conflicts).toHaveLength(0);
   });
 });
