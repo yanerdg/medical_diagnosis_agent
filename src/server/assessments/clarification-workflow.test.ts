@@ -153,6 +153,91 @@ describe("clarification pause/resume workflow", () => {
     expect(resumed.report?.report_json.pending_clarification).toBeNull();
   });
 
+  it("requires an explicit structured resolution for a conflict question", () => {
+    repository.saveCase({
+      case_id: "case-conflict-resolution",
+      display_name: "conflict resolution",
+      status: "ready_for_assessment",
+      created_at: timestamp,
+      updated_at: timestamp,
+    });
+    repository.saveAssessmentRun({
+      run_id: "run-conflict-resolution",
+      case_id: "case-conflict-resolution",
+      status: "paused_for_clinician_input",
+      created_at: timestamp,
+      updated_at: timestamp,
+    });
+    repository.saveClinicalConflicts([
+      {
+        conflict_id: "conflict-resolution-1",
+        case_id: "case-conflict-resolution",
+        category: "fact",
+        severity: "blocking",
+        field: "pathology.status",
+        left_evidence_ids: ["e-left"],
+        right_evidence_ids: ["e-right"],
+        description: "病理状态冲突。",
+        resolution: "unresolved",
+        blocks: ["assessment", "draft_report", "final_report"],
+        created_at: timestamp,
+      },
+    ]);
+    repository.saveClarificationRequest({
+      request_id: "request-conflict-resolution",
+      case_id: "case-conflict-resolution",
+      run_id: "run-conflict-resolution",
+      reason: "证据冲突复核",
+      questions: [
+        {
+          id: "conflict.conflict-resolution-1:1",
+          priority: "high",
+          question: "请选择采用哪一侧证据。",
+          expected_answer_type: "free_text",
+          clinical_purpose: "完成冲突裁决。",
+          blocks_conclusion: true,
+        },
+      ],
+      created_at: timestamp,
+    });
+
+    expect(() =>
+      submitClarificationResponses({
+        repository,
+        requestId: "request-conflict-resolution",
+        body: {
+          responses: [
+            {
+              question_id: "conflict.conflict-resolution-1:1",
+              answer_text: "采用左侧正式病理报告。",
+              marked_unknown: false,
+            },
+          ],
+        },
+        now: () => timestamp,
+      }),
+    ).toThrow("explicit resolution choice");
+
+    const submitted = submitClarificationResponses({
+      repository,
+      requestId: "request-conflict-resolution",
+      body: {
+        responses: [
+          {
+            question_id: "conflict.conflict-resolution-1:1",
+            answer_text: "采用左侧正式病理报告。",
+            marked_unknown: false,
+            conflict_resolution: "confirm_left",
+          },
+        ],
+      },
+      now: () => timestamp,
+    });
+
+    expect(submitted.responses[0]?.conflict_resolution).toBe("confirm_left");
+    expect(repository.listUnresolvedClinicalConflicts("case-conflict-resolution")).toEqual([]);
+  });
+
   function savePausedCase(caseId: string): void {
     repository.saveCase({
       case_id: caseId,

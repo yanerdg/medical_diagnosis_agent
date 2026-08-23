@@ -80,12 +80,30 @@ describe("ClinicalContextManager", () => {
       resolution: "clinician_confirmed",
       resolved_at: "2026-08-23T00:00:00.000Z",
     });
+    repository.saveClinicalConflicts([
+      {
+        conflict_id: "rag:structure-context-1:citation-1:scope",
+        case_id: structure.case_id,
+        structure_id: structure.structure_id,
+        category: "rag_scope",
+        severity: "blocking",
+        field: "rag.cancer_site_scope",
+        left_evidence_ids: structure.evidence_ids,
+        right_evidence_ids: ["citation-1"],
+        description: "测试 RAG 冲突应在结构上下文刷新后保留。",
+        resolution: "unresolved",
+        blocks: ["draft_report", "final_report"],
+        created_at: "2026-08-23T00:00:00.000Z",
+      },
+    ]);
     const rebuilt = new ClinicalContextManager(repository).build({
       case_id: structure.case_id,
       run_id: "run-resolved-conflict",
       structure,
       profile: "conflict_check",
     });
-    expect(rebuilt.unresolved_conflicts).toHaveLength(0);
+    expect(rebuilt.unresolved_conflicts).toEqual([
+      expect.objectContaining({ conflict_id: "rag:structure-context-1:citation-1:scope" }),
+    ]);
   });
 });

@@ -175,7 +175,7 @@ export async function runAssessmentGraph(
     max_loop_count: graph.max_loop_count,
     next: graph.entrypoint,
     structure,
-    source_texts: loadSourceTexts(repository, params.case_id),
+    source_texts: sourceTextsFromContext(contextBundle),
     context_bundle: contextBundle,
     missing_evidence: [],
     acknowledged_missing_evidence_codes:
@@ -642,17 +642,18 @@ async function clarificationGateNode(
       return failState(state, "Clarification resume payload references an invalid structure.");
     }
 
+    const resumedContext = new ClinicalContextManager(runtime.repository).build({
+      case_id: state.case_id,
+      run_id: state.run_id,
+      structure: resumedStructure,
+      profile: "required_information_check",
+    });
     return {
       ...state,
       structure_id: resumedStructure.structure_id,
       structure: resumedStructure,
-      source_texts: loadSourceTexts(runtime.repository, state.case_id),
-      context_bundle: new ClinicalContextManager(runtime.repository).build({
-        case_id: state.case_id,
-        run_id: state.run_id,
-        structure: resumedStructure,
-        profile: "required_information_check",
-      }),
+      source_texts: sourceTextsFromContext(resumedContext),
+      context_bundle: resumedContext,
       status: "running",
       next: "intake_validation",
       loop_count: 0,
@@ -1022,14 +1023,10 @@ function loadStructure(
     : (repository.getLatestSpecialtyStructure(params.case_id) ?? undefined);
 }
 
-function loadSourceTexts(
-  repository: MedicalRepository,
-  caseId: string,
+function sourceTextsFromContext(
+  contextBundle: AssessmentRunState["context_bundle"],
 ): string[] {
-  return repository
-    .listCaseInputs(caseId)
-    .map((input) => repository.readCaseInputRawText(input.input_id))
-    .filter((text): text is string => text !== null && text.trim().length > 0);
+  return contextBundle?.source_excerpts.map((excerpt) => excerpt.text) ?? [];
 }
 
 function failState(

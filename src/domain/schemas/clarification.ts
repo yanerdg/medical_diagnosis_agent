@@ -39,6 +39,9 @@ export const clarificationResponseSchema = z
     question_id: z.string().min(1),
     answer_text: z.string().min(1).optional(),
     marked_unknown: z.boolean(),
+    conflict_resolution: z
+      .enum(["confirm_left", "confirm_right", "acknowledge_unknown"])
+      .optional(),
     supplemental_input_id: z.string().min(1).optional(),
     submitted_at: isoDateTimeSchema,
   })

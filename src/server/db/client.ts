@@ -22,6 +22,18 @@ export function getDatabasePath(): string {
 
 export function initializeDatabase(database: SqliteDatabase): void {
   database.exec(databaseSchema);
+  migrateDatabase(database);
+}
+
+function migrateDatabase(database: SqliteDatabase): void {
+  const responseColumns = database
+    .prepare("PRAGMA table_info(clarification_responses)")
+    .all() as Array<{ name: string }>;
+  if (!responseColumns.some((column) => column.name === "conflict_resolution")) {
+    database.exec(
+      "ALTER TABLE clarification_responses ADD COLUMN conflict_resolution TEXT CHECK (conflict_resolution IN ('confirm_left', 'confirm_right', 'acknowledge_unknown'))",
+    );
+  }
 }
 
 export function openDatabase(databasePath = getDatabasePath()): SqliteDatabase {

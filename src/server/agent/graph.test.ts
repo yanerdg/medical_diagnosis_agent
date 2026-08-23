@@ -161,6 +161,31 @@ describe("assessment agent graph", () => {
     ).toBe(true);
   });
 
+  it("keeps only bounded context excerpts in durable graph state", async () => {
+    saveCaseWithStructure(
+      "case-bounded-context",
+      completeStructure("case-bounded-context", "structure-bounded-context"),
+      "病理提示鳞状细胞癌。",
+    );
+    for (let index = 0; index < 4; index += 1) {
+      repository.createCaseInputFromRawText({
+        input_id: `case-bounded-context-extra-${index}`,
+        case_id: "case-bounded-context",
+        input_type: "other",
+        raw_text: `额外病历原文 ${index}`,
+        submitted_at: timestamp,
+      });
+    }
+
+    const result = await runAssessmentGraph({
+      case_id: "case-bounded-context",
+      repository,
+      now: () => timestamp,
+    });
+
+    expect(result.state.source_texts).toHaveLength(3);
+  });
+
   it("fails before exceeding the configured loop limit", async () => {
     saveCaseWithStructure(
       "case-loop-limit",

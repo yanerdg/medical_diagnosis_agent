@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS clarification_responses (
   question_id TEXT NOT NULL,
   answer_text TEXT,
   marked_unknown INTEGER NOT NULL CHECK (marked_unknown IN (0, 1)),
+  conflict_resolution TEXT CHECK (conflict_resolution IN ('confirm_left', 'confirm_right', 'acknowledge_unknown')),
   supplemental_input_id TEXT REFERENCES case_inputs(input_id) ON DELETE SET NULL,
   submitted_at TEXT NOT NULL
 );

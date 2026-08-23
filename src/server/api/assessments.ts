@@ -41,6 +41,9 @@ const clarificationResponseItemSchema = z
     question_id: trimmedNonBlankString,
     answer_text: optionalTrimmedNonBlankString,
     marked_unknown: z.boolean().optional().default(false),
+    conflict_resolution: z
+      .enum(["confirm_left", "confirm_right", "acknowledge_unknown"])
+      .optional(),
   })
   .strict()
   .refine(

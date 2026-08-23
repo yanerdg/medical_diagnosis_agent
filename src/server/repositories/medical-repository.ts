@@ -67,11 +67,12 @@ interface ClarificationRequestRow {
 
 type ClarificationResponseRow = Omit<
   ClarificationResponse,
-  "answer_text" | "marked_unknown" | "supplemental_input_id"
+  "answer_text" | "marked_unknown" | "supplemental_input_id" | "conflict_resolution"
 > & {
   answer_text: string | null;
   marked_unknown: 0 | 1;
   supplemental_input_id: string | null;
+  conflict_resolution: "confirm_left" | "confirm_right" | "acknowledge_unknown" | null;
 };
 
 type CaseConversationMessageRow = Omit<
@@ -368,9 +369,12 @@ export class MedicalRepository {
         .prepare(
           `DELETE FROM clinical_conflicts
            WHERE case_id = ? AND resolution = 'unresolved'
-             ${params.structure_id ? "AND structure_id = ?" : "AND structure_id IS NULL"}`,
+             ${params.structure_id ? "AND conflict_id LIKE ?" : "AND structure_id IS NULL"}`,
         )
-        .run(params.case_id, ...(params.structure_id ? [params.structure_id] : []));
+        .run(
+          params.case_id,
+          ...(params.structure_id ? [`${params.structure_id}:%`] : []),
+        );
 
       const statement = this.database.prepare(
         `INSERT OR IGNORE INTO clinical_conflicts (
@@ -761,6 +765,7 @@ export class MedicalRepository {
           question_id,
           answer_text,
           marked_unknown,
+          conflict_resolution,
           supplemental_input_id,
           submitted_at
         )
@@ -770,12 +775,14 @@ export class MedicalRepository {
           @question_id,
           @answer_text,
           @marked_unknown,
+          @conflict_resolution,
           @supplemental_input_id,
           @submitted_at
         )
         ON CONFLICT(response_id) DO UPDATE SET
           answer_text = excluded.answer_text,
           marked_unknown = excluded.marked_unknown,
+          conflict_resolution = excluded.conflict_resolution,
           supplemental_input_id = excluded.supplemental_input_id,
           submitted_at = excluded.submitted_at
         `,
@@ -786,6 +793,7 @@ export class MedicalRepository {
         question_id: record.question_id,
         answer_text: record.answer_text ?? null,
         marked_unknown: record.marked_unknown ? 1 : 0,
+        conflict_resolution: record.conflict_resolution ?? null,
         supplemental_input_id: record.supplemental_input_id ?? null,
         submitted_at: record.submitted_at,
       });
@@ -1420,6 +1428,7 @@ function toClarificationResponse(
     ...row,
     answer_text: optionalString(row.answer_text),
     marked_unknown: row.marked_unknown === 1,
+    conflict_resolution: row.conflict_resolution ?? undefined,
     supplemental_input_id: optionalString(row.supplemental_input_id),
   });
 }

@@ -93,11 +93,27 @@ export function submitClarificationResponses(params: {
     request.questions.map((question) => [question.id, question]),
   );
   for (const response of body.responses) {
-    if (!questionById.has(response.question_id)) {
+    const question = questionById.get(response.question_id);
+    if (!question) {
       throw new ClarificationWorkflowError(
         400,
         `Question does not belong to this clarification request: ${response.question_id}`,
       );
+    }
+    if (isConflictQuestion(question.id)) {
+      if (!response.conflict_resolution) {
+        throw new ClarificationWorkflowError(
+          400,
+          "A conflict clarification requires an explicit resolution choice.",
+        );
+      }
+      const expectsUnknown = response.conflict_resolution === "acknowledge_unknown";
+      if (response.marked_unknown !== expectsUnknown) {
+        throw new ClarificationWorkflowError(
+          400,
+          "Conflict resolution choice must match marked_unknown.",
+        );
+      }
     }
   }
 
@@ -128,6 +144,7 @@ export function submitClarificationResponses(params: {
       question_id: response.question_id,
       answer_text: response.answer_text,
       marked_unknown: response.marked_unknown,
+      conflict_resolution: response.conflict_resolution,
       supplemental_input_id: supplementalInput?.input_id,
       submitted_at: submittedAt,
     }),
@@ -145,7 +162,7 @@ export function submitClarificationResponses(params: {
     if (!conflictId) return [];
     const resolved = repository.resolveClinicalConflict({
       conflict_id: conflictId,
-      resolution: response.marked_unknown
+      resolution: response.conflict_resolution === "acknowledge_unknown"
         ? "acknowledged_unknown"
         : "clinician_confirmed",
       resolved_at: submittedAt,
@@ -448,4 +465,8 @@ function missingEvidenceCodeFromQuestionId(questionId: string): string {
 function conflictIdFromQuestionId(questionId: string): string | undefined {
   const code = missingEvidenceCodeFromQuestionId(questionId);
   return code.startsWith("conflict.") ? code.slice("conflict.".length) : undefined;
+}
+
+function isConflictQuestion(questionId: string): boolean {
+  return conflictIdFromQuestionId(questionId) !== undefined;
 }
