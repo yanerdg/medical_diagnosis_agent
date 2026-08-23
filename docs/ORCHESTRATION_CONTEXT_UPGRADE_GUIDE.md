@@ -363,6 +363,8 @@ type AssessmentGraphState = {
 2. 仅让 planner 选择补证手段，不让其裁决病理、红旗或安全门。
 3. 接入 claim-to-evidence、RAG provenance 与最终跨模态校验。
 
+当前完成状态：评估图已在全部确定性门禁之后运行受限的 `react_plan → react_act → react_observe → react_decide` 循环。当前白名单动作仅包含 `rag_search` 与 `generate_draft`，每一步均写入 run event；病理、冲突和安全门仍在其之前或之后进行确定性裁决。CT/WSI 动作与引用语义蕴含检查仍待接入。
+
 ### 阶段 E：CT / WSI 工具
 
 1. 先使用 mock 异步 job 跑通提交、等待、重启恢复和冲突流。

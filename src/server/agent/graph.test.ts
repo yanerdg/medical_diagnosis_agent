@@ -90,7 +90,13 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(5);
+    ).toHaveLength(13);
+    expect(events.map((event) => event.event_type)).toEqual(
+      expect.arrayContaining([
+        "assessment.react.planned",
+        "assessment.react.observed",
+      ]),
+    );
     expect(events.map((event) => event.sequence)).toEqual(
       events.map((_, index) => index + 1),
     );

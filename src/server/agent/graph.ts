@@ -35,11 +35,13 @@ import {
 } from "./tools";
 import {
   MAX_AGENT_LOOP_COUNT,
+  MAX_REACT_TURN_COUNT,
   type AssessmentGraphDefinition,
   type AssessmentGraphNext,
   type AssessmentNodeName,
   type AssessmentRunState,
   type MissingEvidenceItem,
+  type PlannedAction,
   type WhitelistedToolName,
 } from "./types";
 
@@ -127,6 +129,10 @@ export function createAssessmentGraph(
         name: "clarification_gate",
         invoke: (state) => clarificationGateNode(state, runtime),
       },
+      react_plan: { name: "react_plan", invoke: (state) => reactPlanNode(state, runtime) },
+      react_act: { name: "react_act", invoke: (state) => reactActNode(state, runtime) },
+      react_observe: { name: "react_observe", invoke: (state) => reactObserveNode(state, runtime) },
+      react_decide: { name: "react_decide", invoke: (state) => reactDecideNode(state, runtime) },
     },
   };
 }
@@ -172,6 +178,7 @@ export async function runAssessmentGraph(
     structure_id: structure?.structure_id ?? params.structure_id,
     status: "running",
     loop_count: 0,
+    react_turn_count: 0,
     max_loop_count: graph.max_loop_count,
     next: graph.entrypoint,
     structure,
@@ -349,12 +356,20 @@ function createDurableAssessmentGraph(
     .addNode("missing_evidence_check", invoke("missing_evidence_check"))
     .addNode("conflict_check", invoke("conflict_check"))
     .addNode("clarification_gate", invoke("clarification_gate"))
+    .addNode("react_plan", invoke("react_plan"))
+    .addNode("react_act", invoke("react_act"))
+    .addNode("react_observe", invoke("react_observe"))
+    .addNode("react_decide", invoke("react_decide"))
     .addEdge(START, "intake_validation")
     .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("missing_evidence_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("conflict_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("clarification_gate", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("react_plan", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("react_act", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("react_observe", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("react_decide", (state) => routeDurableNext(state.assessment.next))
     .compile({ checkpointer: createAssessmentCheckpointer(checkpointPath) });
 }
 
@@ -664,29 +679,93 @@ async function clarificationGateNode(
     };
   }
 
-  const pendingClarification = undefined;
-  const reportState = await runReportToolchain(
-    {
-      ...state,
-      pending_clarification: pendingClarification,
-    },
-    runtime,
-  );
+  return { ...state, next: "react_plan" };
+}
+
+async function reactPlanNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  const currentReactTurns = state.react_turn_count ?? 0;
+  if (currentReactTurns >= MAX_REACT_TURN_COUNT) {
+    return failState(state, `ReAct turn limit exceeded: ${MAX_REACT_TURN_COUNT}`);
+  }
+  const contextBundle = state.structure
+    ? new ClinicalContextManager(runtime.repository).build({
+        case_id: state.case_id,
+        run_id: state.run_id,
+        structure: state.structure,
+        profile: "react_planner",
+      })
+    : state.context_bundle;
+  const action: PlannedAction = state.tool_outputs.rag_search
+    ? "generate_draft"
+    : "rag_search";
+  appendRunEvent(runtime.repository, state, "assessment.react.planned", {
+    action,
+    react_turn_count: currentReactTurns + 1,
+    context_fingerprint: contextBundle?.source_fingerprint ?? null,
+  });
+  return {
+    ...state,
+    context_bundle: contextBundle,
+    planned_action: action,
+    react_turn_count: currentReactTurns + 1,
+    next: "react_act",
+  };
+}
+
+async function reactActNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (state.planned_action === "rag_search") {
+    return { ...await retrieveRag(state, runtime), next: "react_observe" };
+  }
+  if (state.planned_action === "generate_draft") {
+    return { ...await runReportToolchain(state, runtime), next: "react_observe" };
+  }
+  return failState(state, "ReAct planner returned no executable action.");
+}
+
+async function reactObserveNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  appendRunEvent(runtime.repository, state, "assessment.react.observed", {
+    action: state.planned_action ?? null,
+    has_rag: state.tool_outputs.rag_search !== undefined,
+    has_report: state.report !== undefined,
+  });
+  return { ...state, next: "react_decide" };
+}
+
+async function reactDecideNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (state.planned_action === "rag_search") {
+    return { ...state, next: "react_plan" };
+  }
+  if (state.planned_action !== "generate_draft") {
+    return failState(state, "ReAct decision has no completed draft action.");
+  }
+  return finalizeReportState(state, runtime);
+}
+
+function finalizeReportState(
+  reportState: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): AssessmentRunState {
   const validation = reportState.tool_outputs.output_schema_validator;
   recordClaimEvidenceConflicts(runtime, reportState, validation);
   recordReportGateEvents(runtime.repository, reportState, validation);
   const nextStatus: AssessmentRunStatus =
-    pendingClarification !== undefined
-      ? "paused_for_clinician_input"
-      : validation?.valid
-        ? "completed"
-        : "rejected_by_safety_gate";
+    validation?.valid ? "completed" : "rejected_by_safety_gate";
   const next: AssessmentGraphNext =
     nextStatus === "completed"
       ? "completed"
-      : nextStatus === "paused_for_clinician_input"
-        ? "paused"
-        : "failed";
+      : "failed";
 
   if (
     reportState.report &&
@@ -695,8 +774,8 @@ async function clarificationGateNode(
   ) {
     const savedReport = runtime.repository.saveAssessmentReport({
       report_id: randomUUID(),
-      run_id: state.run_id,
-      case_id: state.case_id,
+      run_id: reportState.run_id,
+      case_id: reportState.case_id,
       report_json: reportState.report,
       report_markdown: reportState.report_markdown,
       created_at: runtime.now(),
@@ -714,7 +793,7 @@ async function clarificationGateNode(
     ...reportState,
     status: nextStatus,
     next,
-    pending_clarification: pendingClarification,
+    pending_clarification: undefined,
     errors:
       nextStatus === "rejected_by_safety_gate"
         ? [
@@ -809,6 +888,46 @@ function recordReportGateEvents(
   );
 }
 
+async function retrieveRag(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure) {
+    return failState(state, "No specialty structure is available for RAG retrieval");
+  }
+  const rag = await runtime.callTool(
+    state,
+    "rag_search",
+    { structure: state.structure, missing_evidence: state.missing_evidence },
+    WHITELISTED_ASSESSMENT_TOOLS.rag_search,
+  );
+  const conflicts = detectRagCitationConflicts({
+    case_id: state.case_id,
+    structure: state.structure,
+    citations: rag.citations,
+    created_at: runtime.now(),
+  });
+  runtime.repository.saveClinicalConflicts(conflicts);
+  const excludedCitationIds = new Set(
+    conflicts.flatMap((conflict) => conflict.right_evidence_ids),
+  );
+  const safeRag = {
+    ...rag,
+    citations: rag.citations.filter(
+      (citation) => !excludedCitationIds.has(citation.citation_id),
+    ),
+  };
+  appendRunEvent(runtime.repository, state, "assessment.rag.conflict_checked", {
+    conflict_ids: conflicts.map((conflict) => conflict.conflict_id),
+    excluded_citation_ids: [...excludedCitationIds],
+  });
+  return {
+    ...state,
+    knowledge_version: safeRag.version,
+    tool_outputs: { ...state.tool_outputs, rag_search: safeRag },
+  };
+}
+
 async function runReportToolchain(
   state: AssessmentRunState,
   runtime: AssessmentGraphRuntime,
@@ -817,36 +936,9 @@ async function runReportToolchain(
     return failState(state, "No specialty structure is available for report generation");
   }
 
-  const rag = await runtime.callTool(
-    state,
-    "rag_search",
-    {
-      structure: state.structure,
-      missing_evidence: state.missing_evidence,
-    },
-    WHITELISTED_ASSESSMENT_TOOLS.rag_search,
-  );
-  const ragConflicts = detectRagCitationConflicts({
-    case_id: state.case_id,
-    structure: state.structure,
-    citations: rag.citations,
-    created_at: runtime.now(),
-  });
-  runtime.repository.saveClinicalConflicts(ragConflicts);
-  const excludedCitationIds = new Set(
-    ragConflicts.flatMap((conflict) => conflict.right_evidence_ids),
-  );
-  const safeRag = {
-    ...rag,
-    citations: rag.citations.filter(
-      (citation) => !excludedCitationIds.has(citation.citation_id),
-    ),
-  };
-  if (ragConflicts.length > 0) {
-    appendRunEvent(runtime.repository, state, "assessment.rag.conflict_checked", {
-      conflict_ids: ragConflicts.map((conflict) => conflict.conflict_id),
-      excluded_citation_ids: [...excludedCitationIds],
-    });
+  const rag = state.tool_outputs.rag_search;
+  if (!rag) {
+    return failState(state, "ReAct draft generation requires completed RAG retrieval");
   }
   const sensitivity = await runtime.callTool(
     state,
@@ -855,7 +947,7 @@ async function runReportToolchain(
     (structure) =>
       WHITELISTED_ASSESSMENT_TOOLS.sensitivity_assessor(
         structure,
-        safeRag.citations,
+        rag.citations,
       ),
   );
   const tolerance = await runtime.callTool(
@@ -884,13 +976,13 @@ async function runReportToolchain(
       stage_clues: [],
       missing_for_staging: [],
     },
-    citations: safeRag.citations,
+    citations: rag.citations,
     sensitivity,
     tolerance,
     contradictions:
       state.tool_outputs.contradiction_checker?.contradictions ?? [],
     pending_clarification: state.pending_clarification,
-    knowledge_version: safeRag.version,
+    knowledge_version: rag.version,
     created_at: runtime.now(),
   };
   const generated = await runtime.callTool(
@@ -915,10 +1007,10 @@ async function runReportToolchain(
     ...state,
     report: generated.report_json,
     report_markdown: generated.report_markdown,
-    knowledge_version: safeRag.version,
+    knowledge_version: rag.version,
     tool_outputs: {
       ...state.tool_outputs,
-      rag_search: safeRag,
+      rag_search: rag,
       sensitivity_assessor: sensitivity,
       tolerance_assessor: tolerance,
       report_generator: generated,
@@ -1078,6 +1170,10 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "missing_evidence_check",
     "conflict_check",
     "clarification_gate",
+    "react_plan",
+    "react_act",
+    "react_observe",
+    "react_decide",
   ].includes(next);
 }
 

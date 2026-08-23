@@ -8,14 +8,22 @@ import type { RuleIssue, DetectedRedFlag } from "@/domain/rules";
 import type { KnowledgeCitation } from "@/server/kb/search";
 import type { ContextBundle } from "@/server/context";
 
-export const MAX_AGENT_LOOP_COUNT = 6;
+// Includes deterministic gates plus ReAct plan/act/observe/decide nodes.
+export const MAX_AGENT_LOOP_COUNT = 16;
+export const MAX_REACT_TURN_COUNT = 6;
+
+export type PlannedAction = "rag_search" | "generate_draft" | "finish";
 
 export type AssessmentNodeName =
   | "intake_validation"
   | "pathology_gate"
   | "missing_evidence_check"
   | "conflict_check"
-  | "clarification_gate";
+  | "clarification_gate"
+  | "react_plan"
+  | "react_act"
+  | "react_observe"
+  | "react_decide";
 
 export type AssessmentGraphTerminal = "completed" | "paused" | "failed";
 
@@ -102,6 +110,8 @@ export interface AssessmentRunState {
   status: AssessmentRunStatus;
   loop_count: number;
   max_loop_count: number;
+  react_turn_count: number;
+  planned_action?: PlannedAction;
   current_node?: AssessmentNodeName;
   next: AssessmentGraphNext;
   structure?: SpecialtyStructure;
