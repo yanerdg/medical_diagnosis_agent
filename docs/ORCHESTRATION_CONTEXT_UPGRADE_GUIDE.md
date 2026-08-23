@@ -355,7 +355,7 @@ type AssessmentGraphState = {
 2. `run_id = thread_id`，保留现有 API 的兼容适配层。
 3. 将暂停/恢复改为 `interrupt` / `Command(resume)`；补进程重启恢复测试。
 
-当前完成状态：评估图已使用 SQLite checkpointer；阻断性缺失在 `clarification_gate` 创建幂等追问请求后触发 `interrupt`，恢复接口先校验并落库医生回答，再以原 `run_id`/`thread_id` 的 `Command(resume)` 继续。暂停时不生成报告；恢复后会重新装配病例上下文并从信息校验节点继续。
+当前完成状态：评估图已使用 SQLite checkpointer；阻断性缺失在 `clarification_gate` 创建幂等追问请求后触发 `interrupt`，恢复接口先校验并落库医生回答，再以原 `run_id`/`thread_id` 的 `Command(resume)` 继续。暂停时不生成报告；恢复后会重新装配病例上下文并从信息校验节点继续。已覆盖关闭 SQLite saver 后重新编译图并恢复同一中断 run 的回归测试。
 
 ### 阶段 D：受限 ReAct 内核
 

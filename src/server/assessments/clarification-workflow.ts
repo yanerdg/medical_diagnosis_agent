@@ -211,6 +211,7 @@ export async function resumeAssessmentRun(params: {
   repository: MedicalRepository;
   runId: string;
   body: ResumeAssessmentRunRequest;
+  checkpoint_path?: string;
   now?: () => string;
 }): Promise<ResumeAssessmentRunResult> {
   const { repository, runId, body } = params;
@@ -266,6 +267,7 @@ export async function resumeAssessmentRun(params: {
     structure_id: extraction.structure.structure_id,
     acknowledged_missing_evidence_codes: acknowledgedMissingEvidenceCodes,
     repository,
+    checkpoint_path: params.checkpoint_path,
     now,
   });
 

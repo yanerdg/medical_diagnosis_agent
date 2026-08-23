@@ -1,5 +1,6 @@
 import type { SpecialtyStructure } from "@/domain/schemas";
 import { runAssessmentGraph } from "@/server/agent";
+import { closeAssessmentCheckpointer } from "@/server/agent/langgraph-checkpointer";
 import { openDatabase, type SqliteDatabase } from "@/server/db";
 import { MedicalRepository } from "@/server/repositories";
 import { RawInputStore } from "@/server/storage/raw-input-store";
@@ -36,9 +37,11 @@ describe("clarification pause/resume workflow", () => {
 
   it("saves clarification answers as evidence and resumes the same run with appended events", async () => {
     savePausedCase("case-resume-with-report");
+    const checkpointPath = join(tempDirectory, "interrupted-checkpoints.sqlite");
     const paused = await runAssessmentGraph({
       case_id: "case-resume-with-report",
       repository,
+      checkpoint_path: checkpointPath,
       now: () => timestamp,
     });
     const pausedRunId = paused.run.run_id;
@@ -84,10 +87,14 @@ describe("clarification pause/resume workflow", () => {
       )[0]?.action,
     ).toBe("clarification_response_submitted");
 
+    // Simulate a process restart: the next graph compilation receives a fresh SQLite saver.
+    closeAssessmentCheckpointer(checkpointPath);
+
     const resumed = await resumeAssessmentRun({
       repository,
       runId: pausedRunId,
       body: {},
+      checkpoint_path: checkpointPath,
       now: () => timestamp,
     });
     const events = repository.listRunEvents(pausedRunId);
@@ -111,6 +118,7 @@ describe("clarification pause/resume workflow", () => {
         "assessment.run.resume_completed",
       ]),
     );
+    closeAssessmentCheckpointer(checkpointPath);
   });
 
   it("treats marked unknown as acknowledged and resumes without creating another request", async () => {
