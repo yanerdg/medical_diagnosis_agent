@@ -60,6 +60,7 @@ export function detectRagCitationConflicts(params: {
   return params.citations.flatMap((citation) => {
     if (!citation.cancer_site_scope.includes(params.structure.cancer_site)) {
       return [{
+        conflict_id: `rag:${params.structure.structure_id}:${citation.citation_id}:scope`,
         case_id: params.case_id,
         structure_id: params.structure.structure_id,
         category: "rag_scope" as const,
@@ -73,8 +74,9 @@ export function detectRagCitationConflicts(params: {
         created_at: params.created_at,
       }];
     }
-    if (!["approved", "clinician_reviewed", "internal_mvp_review"].includes(citation.review_status)) {
+    if (!["approved", "clinician_reviewed"].includes(citation.review_status)) {
       return [{
+        conflict_id: `rag:${params.structure.structure_id}:${citation.citation_id}:review-status`,
         case_id: params.case_id,
         structure_id: params.structure.structure_id,
         category: "rag_scope" as const,

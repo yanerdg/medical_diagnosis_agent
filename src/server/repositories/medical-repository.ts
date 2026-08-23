@@ -419,6 +419,41 @@ export class MedicalRepository {
     return rows.map(toConflictItem);
   }
 
+  saveClinicalConflicts(
+    conflicts: CreateConflictItemParams[],
+  ): ConflictItem[] {
+    const statement = this.database.prepare(
+      `INSERT OR IGNORE INTO clinical_conflicts (
+        conflict_id, case_id, structure_id, category, severity, field,
+        left_evidence_ids_json, right_evidence_ids_json, description, resolution,
+        blocks_json, created_at, resolved_at
+      ) VALUES (
+        @conflict_id, @case_id, @structure_id, @category, @severity, @field,
+        @left_evidence_ids_json, @right_evidence_ids_json, @description, @resolution,
+        @blocks_json, @created_at, @resolved_at
+      )`,
+    );
+    const now = nowIso();
+    const records = conflicts.map((item) =>
+      conflictItemSchema.parse({
+        ...item,
+        conflict_id: item.conflict_id ?? randomUUID(),
+        created_at: item.created_at ?? now,
+      }),
+    );
+    for (const conflict of records) {
+      statement.run({
+        ...conflict,
+        structure_id: conflict.structure_id ?? null,
+        left_evidence_ids_json: stringifyJson(conflict.left_evidence_ids),
+        right_evidence_ids_json: stringifyJson(conflict.right_evidence_ids),
+        blocks_json: stringifyJson(conflict.blocks),
+        resolved_at: conflict.resolved_at ?? null,
+      });
+    }
+    return records;
+  }
+
   resolveClinicalConflict(params: {
     conflict_id: string;
     resolution: "clinician_confirmed" | "acknowledged_unknown";

@@ -11,7 +11,11 @@ import {
   getMedicalRepository,
   type MedicalRepository,
 } from "@/server/repositories";
-import { ClinicalContextManager, type ConflictItem } from "@/server/context";
+import {
+  ClinicalContextManager,
+  detectRagCitationConflicts,
+  type ConflictItem,
+} from "@/server/context";
 import {
   Annotation,
   Command,
@@ -785,6 +789,28 @@ async function runReportToolchain(
     },
     WHITELISTED_ASSESSMENT_TOOLS.rag_search,
   );
+  const ragConflicts = detectRagCitationConflicts({
+    case_id: state.case_id,
+    structure: state.structure,
+    citations: rag.citations,
+    created_at: runtime.now(),
+  });
+  runtime.repository.saveClinicalConflicts(ragConflicts);
+  const excludedCitationIds = new Set(
+    ragConflicts.flatMap((conflict) => conflict.right_evidence_ids),
+  );
+  const safeRag = {
+    ...rag,
+    citations: rag.citations.filter(
+      (citation) => !excludedCitationIds.has(citation.citation_id),
+    ),
+  };
+  if (ragConflicts.length > 0) {
+    appendRunEvent(runtime.repository, state, "assessment.rag.conflict_checked", {
+      conflict_ids: ragConflicts.map((conflict) => conflict.conflict_id),
+      excluded_citation_ids: [...excludedCitationIds],
+    });
+  }
   const sensitivity = await runtime.callTool(
     state,
     "sensitivity_assessor",
@@ -792,7 +818,7 @@ async function runReportToolchain(
     (structure) =>
       WHITELISTED_ASSESSMENT_TOOLS.sensitivity_assessor(
         structure,
-        rag.citations,
+        safeRag.citations,
       ),
   );
   const tolerance = await runtime.callTool(
@@ -821,13 +847,13 @@ async function runReportToolchain(
       stage_clues: [],
       missing_for_staging: [],
     },
-    citations: rag.citations,
+    citations: safeRag.citations,
     sensitivity,
     tolerance,
     contradictions:
       state.tool_outputs.contradiction_checker?.contradictions ?? [],
     pending_clarification: state.pending_clarification,
-    knowledge_version: rag.version,
+    knowledge_version: safeRag.version,
     created_at: runtime.now(),
   };
   const generated = await runtime.callTool(
@@ -852,10 +878,10 @@ async function runReportToolchain(
     ...state,
     report: generated.report_json,
     report_markdown: generated.report_markdown,
-    knowledge_version: rag.version,
+    knowledge_version: safeRag.version,
     tool_outputs: {
       ...state.tool_outputs,
-      rag_search: rag,
+      rag_search: safeRag,
       sensitivity_assessor: sensitivity,
       tolerance_assessor: tolerance,
       report_generator: generated,

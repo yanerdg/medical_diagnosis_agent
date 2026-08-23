@@ -347,7 +347,7 @@ type AssessmentGraphState = {
 2. 为病理、红旗、实验室时效、治疗状态、RAG 来源适用性实现确定性规则。
 3. 增加冲突持久化、医生裁决和 `clarification_interrupt`。
 
-当前完成状态：`conflict_check` 已作为显式图节点运行；结构化 blocking 冲突会转成可审计的医生追问并触发 `clarification_interrupt`。医生提交非未知回答会记为 `clinician_confirmed`，标记未知会记为 `acknowledged_unknown`，同一结构的已裁决冲突不会在恢复时重复阻断。RAG 引用适用性、最终主张蕴含和 CT/WSI 冲突仍待接入该节点。
+当前完成状态：`conflict_check` 已作为显式图节点运行；结构化 blocking 冲突会转成可审计的医生追问并触发 `clarification_interrupt`。医生提交非未知回答会记为 `clinician_confirmed`，标记未知会记为 `acknowledged_unknown`，同一结构的已裁决冲突不会在恢复时重复阻断。RAG 引用的癌种适用范围与审核状态已纳入冲突留痕，并会在报告前剔除不合格引用；最终主张蕴含和 CT/WSI 冲突仍待接入。
 
 ### 阶段 C：LangGraph 与恢复控制
 
