@@ -7,6 +7,10 @@ import { openDatabase, type SqliteDatabase } from "../db";
 import { MedicalRepository } from "../repositories";
 import { RawInputStore } from "../storage/raw-input-store";
 import { runAssessmentGraph } from "./graph";
+import {
+  closeAssessmentCheckpointer,
+  createAssessmentCheckpointer,
+} from "./langgraph-checkpointer";
 import { MAX_AGENT_LOOP_COUNT } from "./types";
 
 const timestamp = "2026-07-09T00:00:00.000Z";
@@ -133,10 +137,12 @@ describe("assessment agent graph", () => {
       "病理提示鳞状细胞癌。",
     );
 
+    const checkpointPath = join(tempDirectory, "assessment-checkpoints.sqlite");
     const result = await runAssessmentGraph({
       case_id: "case-loop-limit",
       repository,
       max_loop_count: 1,
+      checkpoint_path: checkpointPath,
       now: () => timestamp,
     });
 
@@ -147,6 +153,15 @@ describe("assessment agent graph", () => {
         .listRunEvents(result.run.run_id)
         .some((event) => event.event_type === "assessment.loop_limit_exceeded"),
     ).toBe(true);
+
+    const checkpoints = [];
+    for await (const checkpoint of createAssessmentCheckpointer(checkpointPath).list({
+      configurable: { thread_id: result.run.run_id },
+    })) {
+      checkpoints.push(checkpoint);
+    }
+    expect(checkpoints.length).toBeGreaterThanOrEqual(2);
+    closeAssessmentCheckpointer(checkpointPath);
   });
 
   function saveCaseWithStructure(

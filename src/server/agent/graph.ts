@@ -12,7 +12,9 @@ import {
   type MedicalRepository,
 } from "@/server/repositories";
 import { ClinicalContextManager } from "@/server/context";
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { randomUUID } from "node:crypto";
+import { createAssessmentCheckpointer } from "./langgraph-checkpointer";
 import {
   WHITELISTED_ASSESSMENT_TOOLS,
   type AssessmentReportGeneratorInput,
@@ -34,6 +36,7 @@ export interface RunAssessmentGraphParams {
   acknowledged_missing_evidence_codes?: string[];
   repository?: MedicalRepository;
   max_loop_count?: number;
+  checkpoint_path?: string;
   now?: () => string;
 }
 
@@ -58,6 +61,12 @@ interface AssessmentGraphRuntime {
     status: AssessmentRunStatus,
   ) => AssessmentRun;
 }
+
+const DurableAssessmentState = Annotation.Root({
+  assessment: Annotation<AssessmentRunState>,
+});
+
+type DurableNodeName = AssessmentNodeName;
 
 export function createAssessmentGraph(
   runtime: AssessmentGraphRuntime,
@@ -138,7 +147,7 @@ export async function runAssessmentGraph(
         profile: "required_information_check",
       })
     : undefined;
-  let state: AssessmentRunState = {
+  const initialState: AssessmentRunState = {
     run_id: runId,
     case_id: params.case_id,
     structure_id: structure?.structure_id ?? params.structure_id,
@@ -156,12 +165,12 @@ export async function runAssessmentGraph(
     tool_outputs: {},
   };
 
-  appendRunEvent(repository, state, "assessment.run.started", {
-    case_id: state.case_id,
-    structure_id: state.structure_id,
-    max_loop_count: state.max_loop_count,
+  appendRunEvent(repository, initialState, "assessment.run.started", {
+    case_id: initialState.case_id,
+    structure_id: initialState.structure_id,
+    max_loop_count: initialState.max_loop_count,
     acknowledged_missing_evidence_codes:
-      state.acknowledged_missing_evidence_codes,
+      initialState.acknowledged_missing_evidence_codes,
     context: contextBundle
       ? {
           source_fingerprint: contextBundle.source_fingerprint,
@@ -173,63 +182,16 @@ export async function runAssessmentGraph(
       : null,
   });
 
-  while (isNodeName(state.next)) {
-    if (state.loop_count >= state.max_loop_count) {
-      state = {
-        ...state,
-        status: "failed",
-        next: "failed",
-        errors: [
-          ...state.errors,
-          `Agent loop limit exceeded: ${state.max_loop_count}`,
-        ],
-      };
-      runtime.updateRunStatus(state, "failed");
-      appendRunEvent(repository, state, "assessment.loop_limit_exceeded", {
-        loop_count: state.loop_count,
-        max_loop_count: state.max_loop_count,
-      });
-      break;
-    }
-
-    const node = graph.nodes[state.next];
-    const startedState = {
-      ...state,
-      current_node: node.name,
-      loop_count: state.loop_count + 1,
-    };
-
-    appendRunEvent(repository, startedState, "assessment.node.started", {
-      node: node.name,
-      loop_count: startedState.loop_count,
-    });
-
-    try {
-      state = await node.invoke(startedState);
-      appendRunEvent(repository, state, "assessment.node.completed", {
-        node: node.name,
-        next: state.next,
-        status: state.status,
-        missing_evidence_count: state.missing_evidence.length,
-      });
-      if (state.status === "failed") {
-        runtime.updateRunStatus(state, "failed");
-      }
-    } catch (error) {
-      state = {
-        ...startedState,
-        status: "failed",
-        next: "failed",
-        errors: [...startedState.errors, errorToMessage(error)],
-      };
-      runtime.updateRunStatus(state, "failed");
-      appendRunEvent(repository, state, "assessment.node.failed", {
-        node: node.name,
-        error: errorToMessage(error),
-      });
-      break;
-    }
-  }
+  const durableGraph = createDurableAssessmentGraph(
+    graph,
+    runtime,
+    params.checkpoint_path,
+  );
+  const durableResult = await durableGraph.invoke(
+    { assessment: initialState },
+    { configurable: { thread_id: runId } },
+  );
+  const state = durableResult.assessment;
 
   appendRunEvent(repository, state, "assessment.run.finished", {
     status: state.status,
@@ -243,6 +205,92 @@ export async function runAssessmentGraph(
     report: repository.getAssessmentReportForRun(runId) ?? undefined,
     clarification_request: state.pending_clarification,
   };
+}
+
+function createDurableAssessmentGraph(
+  definition: AssessmentGraphDefinition,
+  runtime: AssessmentGraphRuntime,
+  checkpointPath: string | undefined,
+) {
+  const invoke = (nodeName: DurableNodeName) => async (state: typeof DurableAssessmentState.State) => ({
+    assessment: await invokeDurableNode(
+      nodeName,
+      state.assessment,
+      definition.nodes[nodeName].invoke,
+      runtime,
+    ),
+  });
+  return new StateGraph(DurableAssessmentState)
+    .addNode("intake_validation", invoke("intake_validation"))
+    .addNode("pathology_gate", invoke("pathology_gate"))
+    .addNode("missing_evidence_check", invoke("missing_evidence_check"))
+    .addNode("clarification_gate", invoke("clarification_gate"))
+    .addEdge(START, "intake_validation")
+    .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("missing_evidence_check", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("clarification_gate", (state) => routeDurableNext(state.assessment.next))
+    .compile({ checkpointer: createAssessmentCheckpointer(checkpointPath) });
+}
+
+async function invokeDurableNode(
+  nodeName: AssessmentNodeName,
+  state: AssessmentRunState,
+  invoke: (state: AssessmentRunState) => Promise<AssessmentRunState>,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (state.loop_count >= state.max_loop_count) {
+    const failed = {
+      ...state,
+      status: "failed" as const,
+      next: "failed" as const,
+      errors: [...state.errors, `Agent loop limit exceeded: ${state.max_loop_count}`],
+    };
+    runtime.updateRunStatus(failed, "failed");
+    appendRunEvent(runtime.repository, failed, "assessment.loop_limit_exceeded", {
+      loop_count: failed.loop_count,
+      max_loop_count: failed.max_loop_count,
+    });
+    return failed;
+  }
+
+  const startedState = {
+    ...state,
+    current_node: nodeName,
+    loop_count: state.loop_count + 1,
+  };
+  appendRunEvent(runtime.repository, startedState, "assessment.node.started", {
+    node: nodeName,
+    loop_count: startedState.loop_count,
+  });
+  try {
+    const nextState = await invoke(startedState);
+    appendRunEvent(runtime.repository, nextState, "assessment.node.completed", {
+      node: nodeName,
+      next: nextState.next,
+      status: nextState.status,
+      missing_evidence_count: nextState.missing_evidence.length,
+    });
+    if (nextState.status === "failed") runtime.updateRunStatus(nextState, "failed");
+    return nextState;
+  } catch (error) {
+    const failed = {
+      ...startedState,
+      status: "failed" as const,
+      next: "failed" as const,
+      errors: [...startedState.errors, errorToMessage(error)],
+    };
+    runtime.updateRunStatus(failed, "failed");
+    appendRunEvent(runtime.repository, failed, "assessment.node.failed", {
+      node: nodeName,
+      error: errorToMessage(error),
+    });
+    return failed;
+  }
+}
+
+function routeDurableNext(next: AssessmentGraphNext): DurableNodeName | typeof END {
+  return isNodeName(next) ? next : END;
 }
 
 async function intakeValidationNode(

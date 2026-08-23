@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { describe, expect, it } from "vitest";
-import { createAssessmentCheckpointer } from "./langgraph-checkpointer";
+import {
+  closeAssessmentCheckpointer,
+  createAssessmentCheckpointer,
+} from "./langgraph-checkpointer";
 
 const CheckpointState = Annotation.Root({
   count: Annotation<number>,
@@ -25,5 +28,6 @@ describe("assessment LangGraph checkpointer", () => {
 
     expect(restored.values).toMatchObject({ count: 1 });
     expect(restored.next).toEqual([]);
+    closeAssessmentCheckpointer(checkpointPath);
   });
 });
