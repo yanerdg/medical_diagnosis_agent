@@ -20,6 +20,14 @@ import {
 import { randomUUID } from "node:crypto";
 import { getDatabase, type SqliteDatabase } from "../db";
 import { RawInputStore } from "../storage/raw-input-store";
+import {
+  clinicalFactSchema,
+  conflictItemSchema,
+  type ClinicalFact,
+  type ConflictItem,
+  type CreateClinicalFactParams,
+  type CreateConflictItemParams,
+} from "@/server/context/types";
 import type {
   AuditEvent,
   CaseConversationMessage,
@@ -87,6 +95,24 @@ type PendingRoughMemoryItemRow = Omit<
 > & {
   source_case_input_id: string | null;
   compacted_at: string | null;
+};
+
+type ClinicalFactRow = Omit<ClinicalFact, "value" | "evidence_ids" | "structure_id" | "observed_at"> & {
+  structure_id: string | null;
+  value_json: string;
+  evidence_ids_json: string;
+  observed_at: string | null;
+};
+
+type ConflictItemRow = Omit<
+  ConflictItem,
+  "structure_id" | "left_evidence_ids" | "right_evidence_ids" | "blocks" | "resolved_at"
+> & {
+  structure_id: string | null;
+  left_evidence_ids_json: string;
+  right_evidence_ids_json: string;
+  blocks_json: string;
+  resolved_at: string | null;
 };
 
 type AssessmentReportRow = Omit<AssessmentReportRecord, "report_json"> & {
@@ -274,6 +300,123 @@ export class MedicalRepository {
     }
 
     return this.rawInputStore.readText(input.raw_text_path);
+  }
+
+  replaceClinicalFactsForStructure(params: {
+    case_id: string;
+    structure_id: string;
+    facts: CreateClinicalFactParams[];
+  }): ClinicalFact[] {
+    const replace = this.database.transaction(() => {
+      this.database
+        .prepare("DELETE FROM clinical_facts WHERE structure_id = ?")
+        .run(params.structure_id);
+
+      const statement = this.database.prepare(
+        `INSERT INTO clinical_facts (
+          fact_id, case_id, structure_id, domain, fact_key, value_json, status,
+          evidence_ids_json, source_priority, observed_at, created_at, updated_at
+        ) VALUES (
+          @fact_id, @case_id, @structure_id, @domain, @fact_key, @value_json, @status,
+          @evidence_ids_json, @source_priority, @observed_at, @created_at, @updated_at
+        )`,
+      );
+      const now = nowIso();
+      const facts = params.facts.map((item) =>
+        clinicalFactSchema.parse({
+          ...item,
+          fact_id: item.fact_id ?? randomUUID(),
+          case_id: params.case_id,
+          structure_id: params.structure_id,
+          created_at: item.created_at ?? now,
+          updated_at: item.updated_at ?? now,
+        }),
+      );
+
+      for (const fact of facts) {
+        statement.run({
+          ...fact,
+          value_json: stringifyJson(fact.value),
+          evidence_ids_json: stringifyJson(fact.evidence_ids),
+          observed_at: fact.observed_at ?? null,
+        });
+      }
+      return facts;
+    });
+
+    return replace();
+  }
+
+  listClinicalFacts(caseId: string, structureId?: string): ClinicalFact[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM clinical_facts
+         WHERE case_id = ? ${structureId ? "AND structure_id = ?" : ""}
+         ORDER BY updated_at ASC, fact_key ASC`,
+      )
+      .all(caseId, ...(structureId ? [structureId] : [])) as ClinicalFactRow[];
+    return rows.map(toClinicalFact);
+  }
+
+  replaceUnresolvedClinicalConflicts(params: {
+    case_id: string;
+    structure_id?: string;
+    conflicts: CreateConflictItemParams[];
+  }): ConflictItem[] {
+    const replace = this.database.transaction(() => {
+      this.database
+        .prepare(
+          `DELETE FROM clinical_conflicts
+           WHERE case_id = ? AND resolution = 'unresolved'
+             ${params.structure_id ? "AND structure_id = ?" : "AND structure_id IS NULL"}`,
+        )
+        .run(params.case_id, ...(params.structure_id ? [params.structure_id] : []));
+
+      const statement = this.database.prepare(
+        `INSERT INTO clinical_conflicts (
+          conflict_id, case_id, structure_id, category, severity, field,
+          left_evidence_ids_json, right_evidence_ids_json, description, resolution,
+          blocks_json, created_at, resolved_at
+        ) VALUES (
+          @conflict_id, @case_id, @structure_id, @category, @severity, @field,
+          @left_evidence_ids_json, @right_evidence_ids_json, @description, @resolution,
+          @blocks_json, @created_at, @resolved_at
+        )`,
+      );
+      const now = nowIso();
+      const conflicts = params.conflicts.map((item) =>
+        conflictItemSchema.parse({
+          ...item,
+          conflict_id: item.conflict_id ?? randomUUID(),
+          case_id: params.case_id,
+          structure_id: params.structure_id,
+          created_at: item.created_at ?? now,
+        }),
+      );
+      for (const conflict of conflicts) {
+        statement.run({
+          ...conflict,
+          structure_id: conflict.structure_id ?? null,
+          left_evidence_ids_json: stringifyJson(conflict.left_evidence_ids),
+          right_evidence_ids_json: stringifyJson(conflict.right_evidence_ids),
+          blocks_json: stringifyJson(conflict.blocks),
+          resolved_at: conflict.resolved_at ?? null,
+        });
+      }
+      return conflicts;
+    });
+    return replace();
+  }
+
+  listUnresolvedClinicalConflicts(caseId: string): ConflictItem[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM clinical_conflicts
+         WHERE case_id = ? AND resolution = 'unresolved'
+         ORDER BY CASE severity WHEN 'blocking' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at ASC`,
+      )
+      .all(caseId) as ConflictItemRow[];
+    return rows.map(toConflictItem);
   }
 
   saveSpecialtyStructure(structure: SpecialtyStructure): SpecialtyStructure {
@@ -1260,6 +1403,41 @@ function toPendingRoughMemoryItem(
     compacted_at: optionalString(row.compacted_at),
     source_case_input_id: optionalString(row.source_case_input_id),
   };
+}
+
+function toClinicalFact(row: ClinicalFactRow): ClinicalFact {
+  return clinicalFactSchema.parse({
+    fact_id: row.fact_id,
+    case_id: row.case_id,
+    structure_id: optionalString(row.structure_id),
+    domain: row.domain,
+    fact_key: row.fact_key,
+    value: parseJson(row.value_json),
+    status: row.status,
+    evidence_ids: parseJson(row.evidence_ids_json),
+    source_priority: row.source_priority,
+    observed_at: optionalString(row.observed_at),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  });
+}
+
+function toConflictItem(row: ConflictItemRow): ConflictItem {
+  return conflictItemSchema.parse({
+    conflict_id: row.conflict_id,
+    case_id: row.case_id,
+    structure_id: optionalString(row.structure_id),
+    category: row.category,
+    severity: row.severity,
+    field: row.field,
+    left_evidence_ids: parseJson(row.left_evidence_ids_json),
+    right_evidence_ids: parseJson(row.right_evidence_ids_json),
+    description: row.description,
+    resolution: row.resolution,
+    blocks: parseJson(row.blocks_json),
+    created_at: row.created_at,
+    resolved_at: optionalString(row.resolved_at),
+  });
 }
 
 function toAssessmentReport(row: AssessmentReportRow): AssessmentReportRecord {

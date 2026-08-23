@@ -6,6 +6,7 @@ import type {
 } from "@/domain/schemas";
 import type { RuleIssue, DetectedRedFlag } from "@/domain/rules";
 import type { KnowledgeCitation } from "@/server/kb/search";
+import type { ContextBundle } from "@/server/context";
 
 export const MAX_AGENT_LOOP_COUNT = 6;
 
@@ -110,6 +111,7 @@ export interface AssessmentRunState {
   report?: AssessmentReportJson;
   report_markdown?: string;
   knowledge_version?: string;
+  context_bundle?: ContextBundle;
   errors: string[];
   tool_outputs: AssessmentToolOutputs;
 }

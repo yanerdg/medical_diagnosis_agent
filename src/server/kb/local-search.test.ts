@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase, type SqliteDatabase } from "@/server/db";
 import { LocalKnowledgeRepository } from "./local-repository";
-import { searchLocalKnowledgeChunks } from "./local-search";
+import {
+  loadLocalKnowledgeCitationsByIds,
+  searchLocalKnowledgeChunks,
+} from "./local-search";
 
 const databases: SqliteDatabase[] = [];
 
@@ -63,5 +66,17 @@ describe("local hybrid knowledge search", () => {
       matched_keywords: expect.arrayContaining(["喉癌分期"]),
     });
     expect(result[0].score).toBeGreaterThan(0);
+
+    const reloaded = loadLocalKnowledgeCitationsByIds(
+      [result[0].citation_id],
+      database,
+    );
+    expect(reloaded).toMatchObject([
+      {
+        citation_id: result[0].citation_id,
+        source_id: "guideline-larynx-2026",
+        review_status: "approved",
+      },
+    ]);
   });
 });

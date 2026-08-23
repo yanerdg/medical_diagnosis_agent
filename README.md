@@ -52,6 +52,8 @@ curl.exe -X POST http://localhost:3000/api/knowledge-documents `
 
 导入成功后，`rag_search` 会优先使用通过审核的 SQLite 知识版本，混合 FTS5/BM25 与本地向量召回；本地 embedding 服务不可用时，会保留关键词召回。运行与故障边界见 [docs/RAG_ROADMAP.md](docs/RAG_ROADMAP.md)。
 
+面向 LangGraph、病例上下文、跨来源冲突检测、CT/WSI 工具接入和恢复控制的实施路线见 [docs/ORCHESTRATION_CONTEXT_UPGRADE_GUIDE.md](docs/ORCHESTRATION_CONTEXT_UPGRADE_GUIDE.md)。
+
 ## 安全与临床边界
 
 完整的功能边界、审核要求与输出约束见 [AGENT.md](AGENT.md)。

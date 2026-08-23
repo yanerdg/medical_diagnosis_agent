@@ -11,6 +11,7 @@ import {
   getMedicalRepository,
   type MedicalRepository,
 } from "@/server/repositories";
+import { ClinicalContextManager } from "@/server/context";
 import { randomUUID } from "node:crypto";
 import {
   WHITELISTED_ASSESSMENT_TOOLS,
@@ -129,6 +130,14 @@ export async function runAssessmentGraph(
     runtime,
     params.max_loop_count ?? MAX_AGENT_LOOP_COUNT,
   );
+  const contextBundle = structure
+    ? new ClinicalContextManager(repository).build({
+        case_id: params.case_id,
+        run_id: runId,
+        structure,
+        profile: "required_information_check",
+      })
+    : undefined;
   let state: AssessmentRunState = {
     run_id: runId,
     case_id: params.case_id,
@@ -139,6 +148,7 @@ export async function runAssessmentGraph(
     next: graph.entrypoint,
     structure,
     source_texts: loadSourceTexts(repository, params.case_id),
+    context_bundle: contextBundle,
     missing_evidence: [],
     acknowledged_missing_evidence_codes:
       params.acknowledged_missing_evidence_codes ?? [],
@@ -152,6 +162,15 @@ export async function runAssessmentGraph(
     max_loop_count: state.max_loop_count,
     acknowledged_missing_evidence_codes:
       state.acknowledged_missing_evidence_codes,
+    context: contextBundle
+      ? {
+          source_fingerprint: contextBundle.source_fingerprint,
+          core_fact_count: contextBundle.core_fact_card.length,
+          task_fact_count: contextBundle.task_facts.length,
+          excerpt_count: contextBundle.source_excerpts.length,
+          unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
+        }
+      : null,
   });
 
   while (isNodeName(state.next)) {

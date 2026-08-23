@@ -66,26 +66,36 @@ export async function searchLocalKnowledgeChunks(
       const lexical = lexicalRank.get(row.chunk_id);
       const vector = vectorRank.get(row.chunk_id);
       const score = (lexical ? 1 / (RRF_K + lexical) : 0) + (vector ? 1 / (RRF_K + vector) : 0);
-      return knowledgeCitationSchema.parse({
-        id: row.chunk_id,
-        chunk_id: row.chunk_id,
-        cancer_site_scope: JSON.parse(row.cancer_site_scope_json),
-        evidence_level: row.evidence_level,
-        text_chunk: row.text_chunk,
-        structured_tags: JSON.parse(row.structured_tags),
-        version: row.knowledge_version,
-        source_id: row.source_id,
-        source_title: row.source_title,
-        source_type: row.source_type,
-        publish_date: row.publish_date,
-        review_status: row.review_status,
-        citation_id: row.chunk_id,
-        score,
-        matched_keywords: matchedTerms(options.query, row),
-      });
+      return toKnowledgeCitation(row, score, options.query);
     })
     .sort((left, right) => right.score - left.score || left.citation_id.localeCompare(right.citation_id))
     .slice(0, options.limit);
+}
+
+export function loadLocalKnowledgeCitationsByIds(
+  citationIds: Iterable<string>,
+  database: SqliteDatabase = getDatabase(),
+): KnowledgeCitation[] {
+  const ids = [...new Set(citationIds)];
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = database.prepare(
+    `
+    SELECT c.chunk_id, d.source_id, d.source_title, d.source_type, d.cancer_site_scope_json,
+           d.evidence_level, d.review_status, d.publish_date, d.original_path,
+           dv.knowledge_version, c.heading_path, c.page_start, c.page_end, c.text_chunk,
+           NULL AS embedding_json, NULL AS lexical_score, COALESCE(f.structured_tags, '[]') AS structured_tags
+    FROM knowledge_chunks c
+    JOIN knowledge_document_versions dv ON dv.document_version_id = c.document_version_id
+    JOIN knowledge_documents d ON d.document_id = dv.document_id
+    LEFT JOIN knowledge_chunk_fts f ON f.chunk_id = c.chunk_id
+    WHERE c.chunk_id IN (${placeholders})
+      AND dv.status = 'completed'
+      AND d.review_status IN ('approved', 'clinician_reviewed')
+    ORDER BY c.chunk_id ASC
+    `,
+  ).all(...ids) as LocalChunkRow[];
+  return rows.map((row) => toKnowledgeCitation(row, 0, ""));
 }
 
 function findLexicalCandidates(database: SqliteDatabase, options: LocalSearchOptions): LocalChunkRow[] {
@@ -154,6 +164,26 @@ function matchedTerms(query: string, row: LocalChunkRow): string[] {
   const haystack = `${row.source_title}\n${row.text_chunk}\n${row.structured_tags}`.toLocaleLowerCase("zh-CN");
   return [...new Set(query.split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2))]
     .filter((term) => haystack.includes(term.toLocaleLowerCase("zh-CN")));
+}
+
+function toKnowledgeCitation(row: LocalChunkRow, score: number, query: string): KnowledgeCitation {
+  return knowledgeCitationSchema.parse({
+    id: row.chunk_id,
+    chunk_id: row.chunk_id,
+    cancer_site_scope: JSON.parse(row.cancer_site_scope_json),
+    evidence_level: row.evidence_level,
+    text_chunk: row.text_chunk,
+    structured_tags: JSON.parse(row.structured_tags),
+    version: row.knowledge_version,
+    source_id: row.source_id,
+    source_title: row.source_title,
+    source_type: row.source_type,
+    publish_date: row.publish_date,
+    review_status: row.review_status,
+    citation_id: row.chunk_id,
+    score,
+    matched_keywords: query ? matchedTerms(query, row) : [],
+  });
 }
 
 function parseVector(value: string): number[] {

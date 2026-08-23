@@ -121,6 +121,40 @@ CREATE TABLE IF NOT EXISTS pending_rough_memory_items (
   UNIQUE (source_case_input_id)
 );
 
+-- Materialized, traceable clinical facts used to assemble bounded agent context.
+-- Source documents remain the clinical source of truth; these rows are an index.
+CREATE TABLE IF NOT EXISTS clinical_facts (
+  fact_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  structure_id TEXT REFERENCES specialty_structures(structure_id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  fact_key TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('confirmed', 'reported', 'unknown', 'conflicting')),
+  evidence_ids_json TEXT NOT NULL,
+  source_priority INTEGER NOT NULL CHECK (source_priority >= 0),
+  observed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (structure_id, fact_key)
+);
+
+CREATE TABLE IF NOT EXISTS clinical_conflicts (
+  conflict_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  structure_id TEXT REFERENCES specialty_structures(structure_id) ON DELETE SET NULL,
+  category TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('blocking', 'high', 'medium', 'low')),
+  field TEXT NOT NULL,
+  left_evidence_ids_json TEXT NOT NULL,
+  right_evidence_ids_json TEXT NOT NULL,
+  description TEXT NOT NULL,
+  resolution TEXT NOT NULL CHECK (resolution IN ('unresolved', 'clinician_confirmed', 'superseded', 'acknowledged_unknown')),
+  blocks_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS run_events (
   event_id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES assessment_runs(run_id) ON DELETE CASCADE,
@@ -245,6 +279,8 @@ CREATE INDEX IF NOT EXISTS case_conversation_messages_case_id_created_idx ON cas
 CREATE INDEX IF NOT EXISTS patient_memory_snapshots_case_id_created_idx ON patient_memory_snapshots(case_id, created_at);
 CREATE INDEX IF NOT EXISTS patient_memory_snapshots_case_id_valid_idx ON patient_memory_snapshots(case_id, source_fingerprint, is_stale);
 CREATE INDEX IF NOT EXISTS pending_rough_memory_items_case_status_created_idx ON pending_rough_memory_items(case_id, status, created_at);
+CREATE INDEX IF NOT EXISTS clinical_facts_case_structure_idx ON clinical_facts(case_id, structure_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS clinical_conflicts_case_resolution_idx ON clinical_conflicts(case_id, resolution, severity);
 CREATE INDEX IF NOT EXISTS run_events_run_id_sequence_idx ON run_events(run_id, sequence);
 CREATE INDEX IF NOT EXISTS assessment_reports_run_id_idx ON assessment_reports(run_id);
 CREATE INDEX IF NOT EXISTS reviews_report_id_idx ON reviews(report_id);

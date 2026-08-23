@@ -9,6 +9,7 @@ import type {
 } from "@/server/api/assessments";
 import { runAssessmentGraph, type RunAssessmentGraphResult } from "@/server/agent";
 import { loadKnowledgeBase } from "@/server/kb/loader";
+import { loadLocalKnowledgeCitationsByIds } from "@/server/kb/local-search";
 import type { KnowledgeCitation } from "@/server/kb/search";
 import type { MedicalRepository, RunEvent } from "@/server/repositories";
 import { randomUUID } from "node:crypto";
@@ -196,12 +197,26 @@ async function loadReportCitations(
     return [];
   }
 
+  // Imported RAG citations are persisted in SQLite.  Resolve them first so a
+  // report remains inspectable even when the legacy file-backed KB is absent.
+  let localCitations: KnowledgeCitation[] = [];
+  try {
+    localCitations = loadLocalKnowledgeCitationsByIds(citationIds);
+  } catch {
+    localCitations = [];
+  }
+  const unresolvedIds = new Set(citationIds);
+  for (const citation of localCitations) unresolvedIds.delete(citation.citation_id);
+
+  if (unresolvedIds.size === 0) {
+    return orderCitations(citationIds, localCitations);
+  }
+
   const knowledgeBase = await loadKnowledgeBase({
     version: report.report_json.knowledge_version,
   });
-
-  return knowledgeBase.chunks
-    .filter((chunk) => citationIds.has(chunk.id))
+  const fileCitations = knowledgeBase.chunks
+    .filter((chunk) => unresolvedIds.has(chunk.id))
     .map((chunk) => ({
       id: chunk.id,
       chunk_id: chunk.chunk_id,
@@ -219,4 +234,15 @@ async function loadReportCitations(
       score: 0,
       matched_keywords: [],
     }));
+  return orderCitations(citationIds, [...localCitations, ...fileCitations]);
+}
+
+function orderCitations(
+  citationIds: Set<string>,
+  citations: KnowledgeCitation[],
+): KnowledgeCitation[] {
+  const byId = new Map(citations.map((citation) => [citation.citation_id, citation]));
+  return [...citationIds]
+    .map((citationId) => byId.get(citationId))
+    .filter((citation): citation is KnowledgeCitation => citation !== undefined);
 }

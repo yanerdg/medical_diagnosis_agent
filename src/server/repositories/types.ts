@@ -1,6 +1,19 @@
 import type { CaseInputType } from "@/domain/schemas";
 import type { JsonValue } from "@/domain/evidence";
 import type { PatientMemory } from "@/lib/clinical-memory";
+import type {
+  ClinicalFact,
+  ConflictItem,
+  CreateClinicalFactParams,
+  CreateConflictItemParams,
+} from "@/server/context/types";
+
+export type {
+  ClinicalFact,
+  ConflictItem,
+  CreateClinicalFactParams,
+  CreateConflictItemParams,
+};
 
 export interface CreateCaseInputFromRawTextParams {
   input_id?: string;
