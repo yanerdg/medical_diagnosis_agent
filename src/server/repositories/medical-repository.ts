@@ -6,6 +6,7 @@ import {
   caseSchema,
   clarificationRequestRecordSchema,
   clarificationResponseSchema,
+  imagingToolJobSchema,
   reviewSchema,
   specialtyStructureSchema,
   type AssessmentReportRecord,
@@ -14,6 +15,7 @@ import {
   type CaseRecord,
   type ClarificationRequestRecord,
   type ClarificationResponse,
+  type ImagingToolJob,
   type Review,
   type SpecialtyStructure,
 } from "@/domain/schemas";
@@ -39,6 +41,7 @@ import type {
   PatientMemorySnapshot,
   PendingRoughMemoryItem,
   RunEvent,
+  SaveImagingToolJobParams,
   SavePatientMemorySnapshotParams,
 } from "./types";
 
@@ -54,6 +57,14 @@ interface SpecialtyStructureRow {
 
 type AssessmentRunRow = Omit<AssessmentRun, "structure_id"> & {
   structure_id: string | null;
+};
+
+type ImagingToolJobRow = Omit<
+  ImagingToolJob,
+  "result_evidence_ids" | "error_message"
+> & {
+  result_evidence_ids_json: string;
+  error_message: string | null;
 };
 
 interface ClarificationRequestRow {
@@ -616,6 +627,75 @@ export class MedicalRepository {
       .all(caseId) as AssessmentRunRow[];
 
     return rows.map(toAssessmentRun);
+  }
+
+  saveImagingToolJob(params: SaveImagingToolJobParams): ImagingToolJob {
+    const record = imagingToolJobSchema.parse({
+      ...params,
+      job_id: params.job_id ?? randomUUID(),
+      created_at: params.created_at ?? nowIso(),
+      updated_at: params.updated_at ?? nowIso(),
+    });
+
+    this.database
+      .prepare(
+        `
+        INSERT INTO imaging_tool_jobs (
+          job_id, kind, case_id, run_id, input_id, input_hash, idempotency_key,
+          status, model_version, result_evidence_ids_json, error_message,
+          created_at, updated_at
+        ) VALUES (
+          @job_id, @kind, @case_id, @run_id, @input_id, @input_hash, @idempotency_key,
+          @status, @model_version, @result_evidence_ids_json, @error_message,
+          @created_at, @updated_at
+        )
+        ON CONFLICT(job_id) DO UPDATE SET
+          status = excluded.status,
+          result_evidence_ids_json = excluded.result_evidence_ids_json,
+          error_message = excluded.error_message,
+          updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        ...record,
+        result_evidence_ids_json: stringifyJson(record.result_evidence_ids),
+        error_message: record.error_message ?? null,
+      });
+
+    return record;
+  }
+
+  getImagingToolJob(jobId: string): ImagingToolJob | null {
+    const row = this.database
+      .prepare("SELECT * FROM imaging_tool_jobs WHERE job_id = ?")
+      .get(jobId) as ImagingToolJobRow | undefined;
+
+    return row ? toImagingToolJob(row) : null;
+  }
+
+  getImagingToolJobByIdempotencyKey(
+    idempotencyKey: string,
+  ): ImagingToolJob | null {
+    const row = this.database
+      .prepare("SELECT * FROM imaging_tool_jobs WHERE idempotency_key = ?")
+      .get(idempotencyKey) as ImagingToolJobRow | undefined;
+
+    return row ? toImagingToolJob(row) : null;
+  }
+
+  listImagingToolJobsForRun(runId: string): ImagingToolJob[] {
+    const rows = this.database
+      .prepare(
+        `
+        SELECT *
+        FROM imaging_tool_jobs
+        WHERE run_id = ?
+        ORDER BY created_at ASC
+        `,
+      )
+      .all(runId) as ImagingToolJobRow[];
+
+    return rows.map(toImagingToolJob);
   }
 
   appendRunEvent(params: CreateRunEventParams): RunEvent {
@@ -1399,6 +1479,24 @@ function toAssessmentRun(row: AssessmentRunRow): AssessmentRun {
   return assessmentRunSchema.parse({
     ...row,
     structure_id: optionalString(row.structure_id),
+  });
+}
+
+function toImagingToolJob(row: ImagingToolJobRow): ImagingToolJob {
+  return imagingToolJobSchema.parse({
+    job_id: row.job_id,
+    kind: row.kind,
+    case_id: row.case_id,
+    run_id: row.run_id,
+    input_id: row.input_id,
+    input_hash: row.input_hash,
+    idempotency_key: row.idempotency_key,
+    status: row.status,
+    model_version: row.model_version,
+    result_evidence_ids: parseJson(row.result_evidence_ids_json),
+    error_message: optionalString(row.error_message),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   });
 }
 

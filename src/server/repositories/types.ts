@@ -1,4 +1,4 @@
-import type { CaseInputType } from "@/domain/schemas";
+import type { CaseInputType, ImagingToolJob } from "@/domain/schemas";
 import type { JsonValue } from "@/domain/evidence";
 import type { PatientMemory } from "@/lib/clinical-memory";
 import type {
@@ -23,6 +23,9 @@ export interface CreateCaseInputFromRawTextParams {
   version?: number;
   submitted_at?: string;
 }
+
+export type SaveImagingToolJobParams = Omit<ImagingToolJob, "job_id" | "created_at" | "updated_at"> &
+  Partial<Pick<ImagingToolJob, "job_id" | "created_at" | "updated_at">>;
 
 export interface RunEvent {
   event_id: string;

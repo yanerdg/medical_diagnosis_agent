@@ -43,6 +43,7 @@ describe("MedicalRepository", () => {
           "pending_rough_memory_items",
         "specialty_structures",
         "assessment_runs",
+        "imaging_tool_jobs",
         "clarification_requests",
         "clarification_responses",
         "run_events",

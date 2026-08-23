@@ -371,6 +371,8 @@ type AssessmentGraphState = {
 2. 再接入真实 Python 推理服务与模型版本记录。
 3. 建立针对低质量、失败、模型与人工报告冲突的测试集。
 
+当前完成状态：已建立 SQLite 持久化的 CT/WSI mock 异步任务底座。提交按 `run_id + input_hash + model_version + tool` 去重，任务状态、结果证据 ID 与审计事件可在重启后读取；重复收集已完成任务不会再次生成结果。下一步才将这些动作加入 ReAct 白名单，并接入真实 Python 推理服务、质量状态和结构化证据/冲突流。
+
 ## 10. 验收标准
 
 - 任意节点/服务重启后，从最后成功 checkpoint 恢复；已成功的 CT/WSI 任务不会重复执行。

@@ -59,6 +59,22 @@ CREATE TABLE IF NOT EXISTS assessment_runs (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS imaging_tool_jobs (
+  job_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('ct', 'wsi')),
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL REFERENCES assessment_runs(run_id) ON DELETE CASCADE,
+  input_id TEXT NOT NULL REFERENCES case_inputs(input_id) ON DELETE CASCADE,
+  input_hash TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'quality_insufficient')),
+  model_version TEXT NOT NULL,
+  result_evidence_ids_json TEXT NOT NULL,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS clarification_requests (
   request_id TEXT PRIMARY KEY,
   case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
@@ -274,6 +290,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunk_fts USING fts5(
 CREATE INDEX IF NOT EXISTS case_inputs_case_id_idx ON case_inputs(case_id);
 CREATE INDEX IF NOT EXISTS specialty_structures_case_id_idx ON specialty_structures(case_id);
 CREATE INDEX IF NOT EXISTS assessment_runs_case_id_idx ON assessment_runs(case_id);
+CREATE INDEX IF NOT EXISTS imaging_tool_jobs_run_status_idx ON imaging_tool_jobs(run_id, status);
 CREATE INDEX IF NOT EXISTS clarification_requests_run_id_idx ON clarification_requests(run_id);
 CREATE INDEX IF NOT EXISTS clarification_responses_request_id_idx ON clarification_responses(request_id);
 CREATE INDEX IF NOT EXISTS case_conversation_messages_case_id_created_idx ON case_conversation_messages(case_id, created_at);
