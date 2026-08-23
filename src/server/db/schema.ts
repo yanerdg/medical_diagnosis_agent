@@ -160,6 +160,82 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TEXT NOT NULL
 );
 
+-- Locally injected knowledge only. Patient inputs never enter these tables.
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  document_id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL UNIQUE,
+  source_title TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  cancer_site_scope_json TEXT NOT NULL,
+  evidence_level TEXT NOT NULL,
+  review_status TEXT NOT NULL,
+  publish_date TEXT NOT NULL,
+  original_filename TEXT NOT NULL,
+  original_path TEXT NOT NULL,
+  original_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_document_versions (
+  document_version_id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL REFERENCES knowledge_documents(document_id) ON DELETE CASCADE,
+  knowledge_version TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  parser_name TEXT NOT NULL,
+  parser_version TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE (document_id, knowledge_version, source_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  chunk_id TEXT PRIMARY KEY,
+  document_version_id TEXT NOT NULL REFERENCES knowledge_document_versions(document_version_id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  heading_path TEXT NOT NULL,
+  page_start INTEGER,
+  page_end INTEGER,
+  text_chunk TEXT NOT NULL,
+  content_sha256 TEXT NOT NULL,
+  token_estimate INTEGER NOT NULL CHECK (token_estimate >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (document_version_id, ordinal),
+  UNIQUE (document_version_id, content_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_embeddings (
+  chunk_id TEXT NOT NULL REFERENCES knowledge_chunks(chunk_id) ON DELETE CASCADE,
+  embedding_model TEXT NOT NULL,
+  embedding_dimension INTEGER NOT NULL CHECK (embedding_dimension > 0),
+  embedding_json TEXT NOT NULL,
+  embedded_content_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, embedding_model)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_ingestion_runs (
+  ingestion_run_id TEXT PRIMARY KEY,
+  document_id TEXT REFERENCES knowledge_documents(document_id) ON DELETE SET NULL,
+  knowledge_version TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'skipped_duplicate')),
+  requested_by TEXT,
+  summary_json TEXT NOT NULL,
+  error_message TEXT,
+  started_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunk_fts USING fts5(
+  chunk_id UNINDEXED,
+  source_title,
+  heading_path,
+  text_chunk,
+  structured_tags
+);
+
 CREATE INDEX IF NOT EXISTS case_inputs_case_id_idx ON case_inputs(case_id);
 CREATE INDEX IF NOT EXISTS specialty_structures_case_id_idx ON specialty_structures(case_id);
 CREATE INDEX IF NOT EXISTS assessment_runs_case_id_idx ON assessment_runs(case_id);
@@ -173,4 +249,9 @@ CREATE INDEX IF NOT EXISTS run_events_run_id_sequence_idx ON run_events(run_id, 
 CREATE INDEX IF NOT EXISTS assessment_reports_run_id_idx ON assessment_reports(run_id);
 CREATE INDEX IF NOT EXISTS reviews_report_id_idx ON reviews(report_id);
 CREATE INDEX IF NOT EXISTS audit_events_entity_idx ON audit_events(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS knowledge_document_versions_document_idx ON knowledge_document_versions(document_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS knowledge_document_versions_status_idx ON knowledge_document_versions(knowledge_version, status);
+CREATE INDEX IF NOT EXISTS knowledge_chunks_version_ordinal_idx ON knowledge_chunks(document_version_id, ordinal);
+CREATE INDEX IF NOT EXISTS knowledge_embeddings_model_idx ON knowledge_embeddings(embedding_model, chunk_id);
+CREATE INDEX IF NOT EXISTS knowledge_ingestion_runs_document_idx ON knowledge_ingestion_runs(document_id, started_at DESC);
 `;

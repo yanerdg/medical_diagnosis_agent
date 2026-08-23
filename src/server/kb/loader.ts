@@ -9,6 +9,11 @@ export const kbSourceTypeSchema = z.enum([
   "local_mvp_rule",
   "local_staging_note",
   "local_tolerance_rule",
+  "guideline",
+  "expert_consensus",
+  "institutional_protocol",
+  "peer_reviewed",
+  "reference_material",
 ]);
 
 export const kbEvidenceLevelSchema = z.enum([
@@ -16,12 +21,15 @@ export const kbEvidenceLevelSchema = z.enum([
   "expert_consensus",
   "guideline_consensus",
   "peer_reviewed",
+  "institutional_reviewed",
 ]);
 
 export const kbReviewStatusSchema = z.enum([
   "draft",
   "internal_mvp_review",
   "clinician_reviewed",
+  "approved",
+  "retired",
 ]);
 
 export const kbVersionManifestSchema = z

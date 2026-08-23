@@ -4,20 +4,11 @@ import {
   evidenceModelSchema,
   type EvidenceModel,
 } from "@/domain/evidence";
-import {
-  knowledgeChunkSchema,
-  loadKnowledgeBase,
-  type KnowledgeChunk,
-} from "./loader";
+import { loadKnowledgeBase, type KnowledgeChunk } from "./loader";
+import { knowledgeCitationSchema, type KnowledgeCitation } from "./citation";
+import { searchLocalKnowledgeChunks } from "./local-search";
 
-export const knowledgeCitationSchema = knowledgeChunkSchema
-  .omit({ source_path: true })
-  .extend({
-    citation_id: z.string().min(1),
-    score: z.number().nonnegative(),
-    matched_keywords: z.array(z.string().min(1)),
-  })
-  .strict();
+export { knowledgeCitationSchema, type KnowledgeCitation } from "./citation";
 
 const searchKnowledgeOptionsSchema = z
   .object({
@@ -47,7 +38,6 @@ const knowledgeEvidenceInputSchema = z
   })
   .strict();
 
-export type KnowledgeCitation = z.infer<typeof knowledgeCitationSchema>;
 export type SearchKnowledgeBaseOptions = z.input<
   typeof searchKnowledgeOptionsSchema
 >;
@@ -60,6 +50,27 @@ export async function searchKnowledgeBase(
   options: SearchKnowledgeBaseOptions,
 ): Promise<KnowledgeSearchResult> {
   const parsedOptions = searchKnowledgeOptionsSchema.parse(options);
+  let localCitations: KnowledgeCitation[] = [];
+  try {
+    localCitations = await searchLocalKnowledgeChunks({
+      query: parsedOptions.query,
+      cancerSite: parsedOptions.cancerSite,
+      tags: parsedOptions.tags,
+      limit: parsedOptions.limit,
+      version: parsedOptions.version,
+    });
+  } catch {
+    // Keep the existing file-backed KB usable when local SQLite has not yet been initialized.
+    localCitations = [];
+  }
+
+  if (localCitations.length > 0) {
+    return knowledgeSearchResultSchema.parse({
+      version: parsedOptions.version ?? localCitations[0].version,
+      citations: localCitations,
+    });
+  }
+
   const knowledgeBase = await loadKnowledgeBase({
     rootDir: parsedOptions.rootDir,
     version: parsedOptions.version,
