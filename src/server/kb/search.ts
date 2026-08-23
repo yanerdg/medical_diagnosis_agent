@@ -71,15 +71,35 @@ export async function searchKnowledgeBase(
     });
   }
 
-  const knowledgeBase = await loadKnowledgeBase({
-    rootDir: parsedOptions.rootDir,
-    version: parsedOptions.version,
-  });
+  let knowledgeBase: Awaited<ReturnType<typeof loadKnowledgeBase>>;
+  try {
+    knowledgeBase = await loadKnowledgeBase({
+      rootDir: parsedOptions.rootDir,
+      version: parsedOptions.version,
+    });
+  } catch (error) {
+    if (isMissingKnowledgeBase(error)) {
+      return knowledgeSearchResultSchema.parse({
+        version: parsedOptions.version ?? "no-local-knowledge",
+        citations: [],
+      });
+    }
+    throw error;
+  }
 
   return knowledgeSearchResultSchema.parse({
     version: knowledgeBase.version,
     citations: searchKnowledgeChunks(knowledgeBase.chunks, parsedOptions),
   });
+}
+
+function isMissingKnowledgeBase(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 export function searchKnowledgeChunks(

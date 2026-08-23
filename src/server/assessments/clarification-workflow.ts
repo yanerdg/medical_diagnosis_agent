@@ -16,7 +16,10 @@ import {
   extractSpecialtyStructure,
   type StructureExtractionResult,
 } from "@/server/cases/structured-extraction";
-import { runAssessmentGraph, type RunAssessmentGraphResult } from "@/server/agent";
+import {
+  resumeAssessmentGraph,
+  type RunAssessmentGraphResult,
+} from "@/server/agent";
 import { createPendingRoughMemoryForCaseInput } from "@/server/memory/rough-memory";
 import type { MedicalRepository } from "@/server/repositories";
 import { randomUUID } from "node:crypto";
@@ -226,7 +229,7 @@ export async function resumeAssessmentRun(params: {
     created_at: resumedAt,
   });
 
-  const result = await runAssessmentGraph({
+  const result = await resumeAssessmentGraph({
     case_id: run.case_id,
     run_id: run.run_id,
     structure_id: extraction.structure.structure_id,

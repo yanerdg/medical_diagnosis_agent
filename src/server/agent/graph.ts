@@ -12,8 +12,17 @@ import {
   type MedicalRepository,
 } from "@/server/repositories";
 import { ClinicalContextManager } from "@/server/context";
-import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
-import { randomUUID } from "node:crypto";
+import {
+  Annotation,
+  Command,
+  END,
+  START,
+  StateGraph,
+  interrupt,
+  isGraphInterrupt,
+  isInterrupted,
+} from "@langchain/langgraph";
+import { createHash, randomUUID } from "node:crypto";
 import { createAssessmentCheckpointer } from "./langgraph-checkpointer";
 import {
   WHITELISTED_ASSESSMENT_TOOLS,
@@ -45,6 +54,23 @@ export interface RunAssessmentGraphResult {
   state: AssessmentRunState;
   report?: AssessmentReportRecord;
   clarification_request?: ClarificationRequest;
+}
+
+export interface ResumeAssessmentGraphParams {
+  case_id: string;
+  run_id: string;
+  structure_id: string;
+  acknowledged_missing_evidence_codes: string[];
+  repository?: MedicalRepository;
+  max_loop_count?: number;
+  checkpoint_path?: string;
+  now?: () => string;
+}
+
+interface ClarificationResumePayload {
+  kind: "clarification_response";
+  structure_id: string;
+  acknowledged_missing_evidence_codes: string[];
 }
 
 interface AssessmentGraphRuntime {
@@ -118,23 +144,7 @@ export async function runAssessmentGraph(
     created_at: existingRun?.created_at ?? now(),
     updated_at: now(),
   });
-  const runtime: AssessmentGraphRuntime = {
-    repository,
-    now,
-    callTool: (state, toolName, input, tool) =>
-      callWhitelistedTool(repository, state, toolName, input, tool),
-    updateRunStatus: (state, status) =>
-      repository.saveAssessmentRun({
-        run_id: state.run_id,
-        case_id: state.case_id,
-        status,
-        structure_id: state.structure?.structure_id ?? state.structure_id,
-        created_at:
-          repository.getAssessmentRun(state.run_id)?.created_at ??
-          initialRun.created_at,
-        updated_at: now(),
-      }),
-  };
+  const runtime = createAssessmentGraphRuntime(repository, now, initialRun);
   const graph = createAssessmentGraph(
     runtime,
     params.max_loop_count ?? MAX_AGENT_LOOP_COUNT,
@@ -191,18 +201,122 @@ export async function runAssessmentGraph(
     { assessment: initialState },
     { configurable: { thread_id: runId } },
   );
-  const state = durableResult.assessment;
+  return finalizeDurableAssessmentResult({
+    repository,
+    run: initialRun,
+    result: durableResult,
+  });
+}
+
+export async function resumeAssessmentGraph(
+  params: ResumeAssessmentGraphParams,
+): Promise<RunAssessmentGraphResult> {
+  const repository = params.repository ?? getMedicalRepository();
+  const now = params.now ?? (() => new Date().toISOString());
+  const existingRun = repository.getAssessmentRun(params.run_id);
+
+  if (!existingRun) {
+    throw new Error(`Assessment run not found: ${params.run_id}`);
+  }
+
+  const run = repository.saveAssessmentRun({
+    ...existingRun,
+    status: "running",
+    structure_id: params.structure_id,
+    updated_at: now(),
+  });
+  const runtime = createAssessmentGraphRuntime(repository, now, run);
+  const definition = createAssessmentGraph(
+    runtime,
+    params.max_loop_count ?? MAX_AGENT_LOOP_COUNT,
+  );
+  const durableGraph = createDurableAssessmentGraph(
+    definition,
+    runtime,
+    params.checkpoint_path,
+  );
+  const result = await durableGraph.invoke(
+    new Command<
+      ClarificationResumePayload,
+      { assessment?: AssessmentRunState },
+      DurableNodeName | "__start__"
+    >({
+      resume: {
+        kind: "clarification_response",
+        structure_id: params.structure_id,
+        acknowledged_missing_evidence_codes:
+          params.acknowledged_missing_evidence_codes,
+      },
+    }),
+    { configurable: { thread_id: params.run_id } },
+  );
+
+  return finalizeDurableAssessmentResult({ repository, run, result });
+}
+
+function createAssessmentGraphRuntime(
+  repository: MedicalRepository,
+  now: () => string,
+  initialRun: AssessmentRun,
+): AssessmentGraphRuntime {
+  return {
+    repository,
+    now,
+    callTool: (state, toolName, input, tool) =>
+      callWhitelistedTool(repository, state, toolName, input, tool),
+    updateRunStatus: (state, status) =>
+      repository.saveAssessmentRun({
+        run_id: state.run_id,
+        case_id: state.case_id,
+        status,
+        structure_id: state.structure?.structure_id ?? state.structure_id,
+        created_at:
+          repository.getAssessmentRun(state.run_id)?.created_at ??
+          initialRun.created_at,
+        updated_at: now(),
+      }),
+  };
+}
+
+function finalizeDurableAssessmentResult(params: {
+  repository: MedicalRepository;
+  run: AssessmentRun;
+  result: typeof DurableAssessmentState.State | Record<string, unknown>;
+}): RunAssessmentGraphResult {
+  const { repository, run, result } = params;
+  const durableResult = result as Record<string | symbol, unknown>;
+  const state = durableResult.assessment as AssessmentRunState;
+
+  if (isInterrupted(result)) {
+    const request = repository.listClarificationRequests(run.run_id).at(-1);
+    const pausedState: AssessmentRunState = {
+      ...state,
+      status: "paused_for_clinician_input",
+      next: "paused",
+      pending_clarification: request
+        ? {
+            request_id: request.request_id,
+            reason: request.reason,
+            questions: request.questions,
+          }
+        : undefined,
+    };
+    return {
+      run: repository.getAssessmentRun(run.run_id) ?? run,
+      state: pausedState,
+      clarification_request: pausedState.pending_clarification,
+    };
+  }
 
   appendRunEvent(repository, state, "assessment.run.finished", {
     status: state.status,
     next: state.next,
     loop_count: state.loop_count,
   });
-
   return {
-    run: repository.getAssessmentRun(runId) ?? initialRun,
+    run: repository.getAssessmentRun(run.run_id) ?? run,
     state,
-    report: repository.getAssessmentReportForRun(runId) ?? undefined,
+    report: repository.getAssessmentReportForRun(run.run_id) ?? undefined,
     clarification_request: state.pending_clarification,
   };
 }
@@ -274,6 +388,9 @@ async function invokeDurableNode(
     if (nextState.status === "failed") runtime.updateRunStatus(nextState, "failed");
     return nextState;
   } catch (error) {
+    if (isGraphInterrupt(error)) {
+      throw error;
+    }
     const failed = {
       ...startedState,
       status: "failed" as const,
@@ -440,10 +557,58 @@ async function clarificationGateNode(
   const blockingMissing = state.missing_evidence.filter(
     (item) => item.severity === "blocking",
   );
-  const pendingClarification =
-    blockingMissing.length > 0
-      ? saveClarificationRequest(state, runtime, blockingMissing)
-      : undefined;
+  if (blockingMissing.length > 0) {
+    const { request: pendingClarification, created } = ensureClarificationRequest(
+      state,
+      runtime,
+      blockingMissing,
+    );
+    const pausedState = {
+      ...state,
+      status: "paused_for_clinician_input" as const,
+      next: "paused" as const,
+      pending_clarification: pendingClarification,
+    };
+    runtime.updateRunStatus(pausedState, "paused_for_clinician_input");
+    if (created) {
+      appendRunEvent(runtime.repository, pausedState, "assessment.clarification.interrupted", {
+        request_id: pendingClarification.request_id,
+        blocking_missing_evidence_codes: blockingMissing.map((item) => item.code),
+      });
+    }
+
+    const resume = interrupt<ClarificationRequest, ClarificationResumePayload>(
+      pendingClarification,
+    );
+    const resumedStructure = runtime.repository.getSpecialtyStructure(
+      resume.structure_id,
+    );
+    if (!resumedStructure || resumedStructure.case_id !== state.case_id) {
+      return failState(state, "Clarification resume payload references an invalid structure.");
+    }
+
+    return {
+      ...state,
+      structure_id: resumedStructure.structure_id,
+      structure: resumedStructure,
+      source_texts: loadSourceTexts(runtime.repository, state.case_id),
+      context_bundle: new ClinicalContextManager(runtime.repository).build({
+        case_id: state.case_id,
+        run_id: state.run_id,
+        structure: resumedStructure,
+        profile: "required_information_check",
+      }),
+      status: "running",
+      next: "intake_validation",
+      loop_count: 0,
+      missing_evidence: [],
+      acknowledged_missing_evidence_codes:
+        resume.acknowledged_missing_evidence_codes,
+      pending_clarification: undefined,
+    };
+  }
+
+  const pendingClarification = undefined;
   const reportState = await runReportToolchain(
     {
       ...state,
@@ -679,13 +844,29 @@ async function callWhitelistedTool<Input, Output>(
   }
 }
 
-function saveClarificationRequest(
+function ensureClarificationRequest(
   state: AssessmentRunState,
   runtime: AssessmentGraphRuntime,
   blockingMissing: MissingEvidenceItem[],
-): ClarificationRequest {
+): { request: ClarificationRequest; created: boolean } {
+  const blockingCodes = blockingMissing.map((item) => item.code).sort();
+  const requestId = `clarification-${createHash("sha256")
+    .update(`${state.run_id}:${blockingCodes.join(",")}`)
+    .digest("hex")
+    .slice(0, 32)}`;
+  const existing = runtime.repository.getClarificationRequest(requestId);
+  if (existing) {
+    return {
+      request: {
+        request_id: existing.request_id,
+        reason: existing.reason,
+        questions: existing.questions,
+      },
+      created: false,
+    };
+  }
   const request = {
-    request_id: randomUUID(),
+    request_id: requestId,
     case_id: state.case_id,
     run_id: state.run_id,
     reason: blockingMissing.map((item) => item.label).join("、"),
@@ -693,11 +874,14 @@ function saveClarificationRequest(
     created_at: runtime.now(),
   };
 
-  runtime.repository.saveClarificationRequest(request);
+  const saved = runtime.repository.saveClarificationRequest(request);
   return {
-    request_id: request.request_id,
-    reason: request.reason,
-    questions: request.questions,
+    request: {
+      request_id: saved.request_id,
+      reason: saved.reason,
+      questions: saved.questions,
+    },
+    created: true,
   };
 }
 
