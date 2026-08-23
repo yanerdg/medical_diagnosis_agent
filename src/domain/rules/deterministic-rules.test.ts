@@ -3,6 +3,7 @@ import { DEFAULT_MEDICAL_DISCLAIMER } from "../schemas";
 import type { AssessmentReportJson, LabSummary } from "../schemas";
 import {
   detectRedFlags,
+  evaluateClaimEvidenceRules,
   evaluatePathologyRules,
   evaluateSafetyRules,
   evaluateToleranceRules,
@@ -133,6 +134,31 @@ describe("evaluatePathologyRules", () => {
     ).map((issue) => issue.code);
 
     expect(issueCodes).toContain("pathology.confirmed_requires_pathology");
+  });
+});
+
+describe("evaluateClaimEvidenceRules", () => {
+  it("blocks non-uncertain sensitivity claims without both case and knowledge evidence", () => {
+    const report = buildReport({
+      sensitivity_assessment: [
+        {
+          modality: "radiotherapy",
+          level: "possible_sensitive",
+          supporting_evidence: [],
+          contradicting_evidence: [],
+          missing_information: [],
+          citations: [],
+          evidence_ids: [],
+        },
+      ],
+    });
+
+    expect(evaluateClaimEvidenceRules(report).map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        "claim.sensitivity_requires_case_evidence",
+        "claim.sensitivity_requires_knowledge_evidence",
+      ]),
+    );
   });
 });
 

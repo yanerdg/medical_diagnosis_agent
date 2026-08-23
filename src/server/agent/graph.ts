@@ -13,6 +13,7 @@ import {
 } from "@/server/repositories";
 import {
   ClinicalContextManager,
+  type CreateConflictItemParams,
   detectRagCitationConflicts,
   type ConflictItem,
 } from "@/server/context";
@@ -671,6 +672,7 @@ async function clarificationGateNode(
     runtime,
   );
   const validation = reportState.tool_outputs.output_schema_validator;
+  recordClaimEvidenceConflicts(runtime, reportState, validation);
   recordReportGateEvents(runtime.repository, reportState, validation);
   const nextStatus: AssessmentRunStatus =
     pendingClarification !== undefined
@@ -722,6 +724,40 @@ async function clarificationGateNode(
           ]
         : reportState.errors,
   };
+}
+
+function recordClaimEvidenceConflicts(
+  runtime: AssessmentGraphRuntime,
+  state: AssessmentRunState,
+  validation: AssessmentRunState["tool_outputs"]["output_schema_validator"],
+): void {
+  const issues = validation?.verifier_issues.filter((issue) =>
+    issue.code.startsWith("claim."),
+  ) ?? [];
+  if (issues.length === 0) return;
+
+  const conflicts = issues.map((issue): CreateConflictItemParams => ({
+    conflict_id: `claim:${state.run_id}:${createHash("sha256")
+      .update(`${issue.code}:${issue.path ?? ""}:${issue.evidence ?? ""}`)
+      .digest("hex")
+      .slice(0, 24)}`,
+    case_id: state.case_id,
+    structure_id: state.structure?.structure_id,
+    category: "claim_evidence" as const,
+    severity: "blocking" as const,
+    field: issue.path ?? "report",
+    left_evidence_ids: state.structure?.evidence_ids ?? [],
+    right_evidence_ids: [],
+    description: issue.message,
+    resolution: "unresolved" as const,
+    blocks: ["draft_report", "final_report"],
+    created_at: runtime.now(),
+  }));
+  runtime.repository.saveClinicalConflicts(conflicts);
+  appendRunEvent(runtime.repository, state, "assessment.claim_evidence.rejected", {
+    conflict_ids: conflicts.map((conflict) => conflict.conflict_id),
+    issue_codes: issues.map((issue) => issue.code),
+  });
 }
 
 function recordReportGateEvents(

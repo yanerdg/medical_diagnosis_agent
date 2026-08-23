@@ -242,6 +242,37 @@ export function evaluateToleranceRules(
   );
 }
 
+export function evaluateClaimEvidenceRules(
+  report: AssessmentReportJson,
+): RuleIssue[] {
+  return report.sensitivity_assessment.flatMap((item, index) => {
+    if (item.level !== "possible_sensitive" && item.level !== "likely_sensitive") {
+      return [];
+    }
+
+    const issues: RuleIssue[] = [];
+    if (item.supporting_evidence.length === 0) {
+      issues.push({
+        code: "claim.sensitivity_requires_case_evidence",
+        severity: "error",
+        path: `sensitivity_assessment.${index}.supporting_evidence`,
+        message: "敏感性主张必须列出病例侧支持证据。",
+        evidence: item.modality,
+      });
+    }
+    if (item.citations.length === 0 || item.evidence_ids.length === 0) {
+      issues.push({
+        code: "claim.sensitivity_requires_knowledge_evidence",
+        severity: "error",
+        path: `sensitivity_assessment.${index}.citations`,
+        message: "非不确定性的敏感性主张必须有已审核知识引用及对应证据 ID。",
+        evidence: item.modality,
+      });
+    }
+    return issues;
+  });
+}
+
 export function detectRedFlags(input: string | string[]): DetectedRedFlag[] {
   const texts = Array.isArray(input) ? input : [input];
   const detected = new Map<RedFlagCategory, DetectedRedFlag>();

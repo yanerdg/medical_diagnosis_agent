@@ -1,6 +1,7 @@
 import {
   detectRedFlags,
   evaluatePathologyRules,
+  evaluateClaimEvidenceRules,
   evaluateRedFlagRules,
   evaluateSafetyRules,
   evaluateToleranceRules,
@@ -179,6 +180,7 @@ export function assessSensitivity(
   citations: Awaited<ReturnType<typeof searchKnowledgeBase>>["citations"],
 ): SensitivityAssessmentItem[] {
   const hasConfirmedPathology = structure.pathology.status === "confirmed";
+  const hasKnowledgeSupport = citations.length > 0;
   const citationIds = citations.map((citation) => citation.citation_id);
   const knowledgeEvidenceIds = citations.map((citation) =>
     buildKnowledgeEvidenceId(
@@ -192,24 +194,28 @@ export function assessSensitivity(
   return [
     {
       modality: "radiotherapy",
-      level: hasConfirmedPathology ? "possible_sensitive" : "uncertain",
-      supporting_evidence: hasConfirmedPathology
+      level: hasConfirmedPathology && hasKnowledgeSupport ? "possible_sensitive" : "uncertain",
+      supporting_evidence: hasConfirmedPathology && hasKnowledgeSupport
         ? compact([structure.pathology.pathology_type, structure.ct.primary_site])
         : [],
       contradicting_evidence: [],
-      missing_information: pathologyMissing,
+      missing_information: unique([
+        ...pathologyMissing,
+        ...(hasKnowledgeSupport ? [] : ["已审核外部知识引用"]),
+      ]),
       citations: citationIds,
       evidence_ids: knowledgeEvidenceIds,
     },
     {
       modality: "platinum_chemo",
-      level: hasConfirmedPathology ? "possible_sensitive" : "uncertain",
-      supporting_evidence: hasConfirmedPathology
+      level: hasConfirmedPathology && hasKnowledgeSupport ? "possible_sensitive" : "uncertain",
+      supporting_evidence: hasConfirmedPathology && hasKnowledgeSupport
         ? compact([structure.pathology.pathology_type])
         : [],
       contradicting_evidence: [],
       missing_information: unique([
         ...pathologyMissing,
+        ...(hasKnowledgeSupport ? [] : ["已审核外部知识引用"]),
         ...missingBiomarkers(structure, ["PD-L1", "p16", "EBV"]),
       ]),
       citations: citationIds,
@@ -222,6 +228,7 @@ export function assessSensitivity(
       contradicting_evidence: [],
       missing_information: unique([
         ...pathologyMissing,
+        ...(hasKnowledgeSupport ? [] : ["已审核外部知识引用"]),
         ...missingBiomarkers(structure, ["PD-L1", "MSI", "TMB"]),
       ]),
       citations: citationIds,
@@ -234,6 +241,7 @@ export function assessSensitivity(
       contradicting_evidence: [],
       missing_information: unique([
         ...pathologyMissing,
+        ...(hasKnowledgeSupport ? [] : ["已审核外部知识引用"]),
         ...missingBiomarkers(structure, ["EGFR", "NTRK"]),
       ]),
       citations: citationIds,
@@ -366,6 +374,7 @@ export function validateAssessmentOutput(
   const verifierIssues = parsed.success
     ? [
         ...evaluatePathologyRules(parsed.data),
+        ...evaluateClaimEvidenceRules(parsed.data),
         ...evaluateToleranceRules(parsed.data, input.structure.labs),
         ...redFlagResult.issues,
       ]
