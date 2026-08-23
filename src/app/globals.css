@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #f3f7fb;
+  color: #132033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(59, 130, 246, 0.18), transparent 30rem),
+    radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.12), transparent 28rem),
+    linear-gradient(180deg, #fbfdff 0%, #eef4fb 48%, #e9f0f8 100%);
+  color: #132033;
+  font-family:
+    Arial,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@layer components {
+  .glass-card {
+    border: 1px solid rgba(255, 255, 255, 0.76);
+    background: rgba(255, 255, 255, 0.38);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.7),
+      0 12px 34px -28px rgba(15, 23, 42, 0.32);
+    backdrop-filter: blur(14px) saturate(1.12);
+  }
+
+  .glass-card-active {
+    border-color: rgba(37, 99, 235, 0.35);
+    background: rgba(255, 255, 255, 0.58);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 0 0 1px rgba(37, 99, 235, 0.1),
+      0 16px 42px -30px rgba(37, 99, 235, 0.42);
+  }
+
+  .glass-control {
+    border: 1px solid rgba(255, 255, 255, 0.76);
+    background: rgba(255, 255, 255, 0.46);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 10px 28px -24px rgba(15, 23, 42, 0.36);
+    backdrop-filter: blur(12px) saturate(1.12);
+  }
+
+  .glass-control:hover,
+  .glass-control:focus-within {
+    border-color: rgba(37, 99, 235, 0.32);
+    background: rgba(255, 255, 255, 0.64);
+  }
+
+  .glass-ink-button {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.72));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.16),
+      0 14px 34px -24px rgba(15, 23, 42, 0.76);
+    backdrop-filter: blur(12px) saturate(1.08);
+  }
+
+  .glass-ink-button:hover {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(51, 65, 85, 0.76));
+  }
+
+  .top-sheet-backdrop {
+    background: rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(18px) saturate(1.08);
+  }
+
+  .top-sheet-surface {
+    background:
+      radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.72), transparent 20rem),
+      linear-gradient(145deg, rgba(248, 250, 252, 0.93), rgba(241, 245, 249, 0.88));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 36px 96px -52px rgba(15, 23, 42, 0.58),
+      0 10px 40px -28px rgba(37, 99, 235, 0.28);
+    outline: 1px solid rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(24px) saturate(1.16);
+  }
+
+  .top-sheet-body {
+    background: linear-gradient(180deg, rgba(226, 232, 240, 0.3), rgba(248, 250, 252, 0.36));
+  }
+
+  .top-sheet-section {
+    background: rgba(255, 255, 255, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 14px 36px -34px rgba(15, 23, 42, 0.34);
+    backdrop-filter: blur(16px) saturate(1.08);
+  }
+
+  .top-sheet-tile {
+    background: rgba(255, 255, 255, 0.48);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+    backdrop-filter: blur(12px) saturate(1.06);
+  }
+}
+
+.floating-scrollbar {
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.floating-scrollbar:hover,
+.floating-scrollbar:focus,
+.floating-scrollbar:focus-within,
+.floating-scrollbar:active {
+  scrollbar-color: rgba(100, 116, 139, 0.38) transparent;
+}
+
+.floating-scrollbar::-webkit-scrollbar {
+  width: 20px;
+}
+
+.floating-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.floating-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  background-clip: content-box;
+  border: 8px solid transparent;
+  border-radius: 999px;
+}
+
+.floating-scrollbar:hover::-webkit-scrollbar-thumb,
+.floating-scrollbar:focus::-webkit-scrollbar-thumb,
+.floating-scrollbar:focus-within::-webkit-scrollbar-thumb,
+.floating-scrollbar:active::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.34);
+  background-clip: content-box;
+}
+
+.floating-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.48);
+  background-clip: content-box;
+}
