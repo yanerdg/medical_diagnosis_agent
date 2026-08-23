@@ -363,7 +363,7 @@ type AssessmentGraphState = {
 2. 仅让 planner 选择补证手段，不让其裁决病理、红旗或安全门。
 3. 接入 claim-to-evidence、RAG provenance 与最终跨模态校验。
 
-当前完成状态：评估图已在全部确定性门禁之后运行受限的 `react_plan → react_act → react_observe → react_decide` 循环。当前白名单动作仅包含 `rag_search` 与 `generate_draft`，每一步均写入 run event；病理、冲突和安全门仍在其之前或之后进行确定性裁决。CT/WSI 动作与引用语义蕴含检查仍待接入。
+当前完成状态：评估图已在全部确定性门禁之后运行受限的 `react_plan → react_act → react_observe → react_decide` 循环。当前白名单动作包含 `submit_ct_job`、`collect_ct_result`、`rag_search` 与 `generate_draft`，每一步均写入 run event；只有存在 `ct_report` 输入且同一 run 尚无已完成 CT job 时才会选择 CT 动作。病理、冲突和安全门仍在其之前或之后进行确定性裁决。WSI 动作、CT/WSI 结果的结构化事实归一化，以及引用语义蕴含检查仍待接入。
 
 ### 阶段 E：CT / WSI 工具
 
@@ -371,7 +371,7 @@ type AssessmentGraphState = {
 2. 再接入真实 Python 推理服务与模型版本记录。
 3. 建立针对低质量、失败、模型与人工报告冲突的测试集。
 
-当前完成状态：已建立 SQLite 持久化的 CT/WSI mock 异步任务底座。提交按 `run_id + input_hash + model_version + tool` 去重，任务状态、结果证据 ID 与审计事件可在重启后读取；重复收集已完成任务不会再次生成结果。下一步才将这些动作加入 ReAct 白名单，并接入真实 Python 推理服务、质量状态和结构化证据/冲突流。
+当前完成状态：已建立 SQLite 持久化的 CT/WSI mock 异步任务底座。提交按 `run_id + input_hash + model_version + tool` 去重，任务状态、结果证据 ID 与审计事件可在重启后读取；重复收集已完成任务不会再次生成结果。CT mock 的提交与收集已接入 ReAct 白名单；下一步接入 WSI、真实 Python 推理服务、质量状态和结构化证据/冲突流。
 
 ## 10. 验收标准
 

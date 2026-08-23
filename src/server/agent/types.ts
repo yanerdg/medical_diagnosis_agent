@@ -8,11 +8,16 @@ import type { RuleIssue, DetectedRedFlag } from "@/domain/rules";
 import type { KnowledgeCitation } from "@/server/kb/search";
 import type { ContextBundle } from "@/server/context";
 
-// Includes deterministic gates plus ReAct plan/act/observe/decide nodes.
-export const MAX_AGENT_LOOP_COUNT = 16;
+// Includes deterministic gates plus up to six ReAct plan/act/observe/decide turns.
+export const MAX_AGENT_LOOP_COUNT = 32;
 export const MAX_REACT_TURN_COUNT = 6;
 
-export type PlannedAction = "rag_search" | "generate_draft" | "finish";
+export type PlannedAction =
+  | "submit_ct_job"
+  | "collect_ct_result"
+  | "rag_search"
+  | "generate_draft"
+  | "finish";
 
 export type AssessmentNodeName =
   | "intake_validation"
@@ -34,6 +39,8 @@ export type WhitelistedToolName =
   | "lab_checker"
   | "tnm_mapper"
   | "rag_search"
+  | "submit_ct_job"
+  | "collect_ct_result"
   | "sensitivity_assessor"
   | "tolerance_assessor"
   | "contradiction_checker"
@@ -92,6 +99,13 @@ export interface AssessmentToolOutputs {
   rag_search?: {
     version: string;
     citations: KnowledgeCitation[];
+  };
+  imaging_jobs?: {
+    ct?: {
+      job_id: string;
+      status: "queued" | "running" | "completed" | "failed" | "quality_insufficient";
+      result_evidence_ids: string[];
+    };
   };
   sensitivity_assessor?: AssessmentReportJson["sensitivity_assessment"];
   tolerance_assessor?: AssessmentReportJson["tolerance_assessment"];

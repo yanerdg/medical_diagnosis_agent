@@ -192,6 +192,49 @@ describe("assessment agent graph", () => {
     expect(result.state.source_texts).toHaveLength(3);
   });
 
+  it("runs the durable CT job actions before retrieval when a CT input is available", async () => {
+    const caseId = "case-ct-job";
+    saveCaseWithStructure(
+      caseId,
+      completeStructure(caseId, "structure-ct-job"),
+      "病理提示鳞状细胞癌。",
+    );
+    repository.createCaseInputFromRawText({
+      input_id: "case-ct-job-ct-input",
+      case_id: caseId,
+      input_type: "ct_report",
+      raw_text: "CT report reference for mock tool execution.",
+      submitted_at: "2026-07-09T00:01:00.000Z",
+    });
+
+    const result = await runAssessmentGraph({
+      case_id: caseId,
+      repository,
+      now: () => timestamp,
+    });
+
+    expect(result.run.status).toBe("completed");
+    expect(result.state.tool_outputs.imaging_jobs?.ct).toMatchObject({
+      status: "completed",
+      result_evidence_ids: [expect.stringMatching(/^imaging-job:.*:mock-result$/)],
+    });
+    const plannedActions = repository
+      .listRunEvents(result.run.run_id)
+      .filter((event) => event.event_type === "assessment.react.planned")
+      .map((event) => event.payload)
+      .map((payload) =>
+        typeof payload === "object" && payload !== null && "action" in payload
+          ? payload.action
+          : null,
+      );
+    expect(plannedActions).toEqual([
+      "submit_ct_job",
+      "collect_ct_result",
+      "rag_search",
+      "generate_draft",
+    ]);
+  });
+
   it("fails before exceeding the configured loop limit", async () => {
     saveCaseWithStructure(
       "case-loop-limit",

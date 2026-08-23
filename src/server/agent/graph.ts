@@ -12,6 +12,10 @@ import {
   type MedicalRepository,
 } from "@/server/repositories";
 import {
+  collectMockImagingJob,
+  submitMockImagingJob,
+} from "@/server/imaging/mock-imaging-jobs";
+import {
   ClinicalContextManager,
   type CreateConflictItemParams,
   detectRagCitationConflicts,
@@ -698,9 +702,25 @@ async function reactPlanNode(
         profile: "react_planner",
       })
     : state.context_bundle;
-  const action: PlannedAction = state.tool_outputs.rag_search
-    ? "generate_draft"
-    : "rag_search";
+  const ctInput = runtime.repository
+    .listCaseInputs(state.case_id)
+    .find((input) => input.input_type === "ct_report");
+  const ctJob = state.tool_outputs.imaging_jobs?.ct ??
+    (ctInput
+      ? runtime.repository
+          .listImagingToolJobsForRun(state.run_id)
+          .find((job) => job.kind === "ct" && job.input_id === ctInput.input_id)
+      : undefined);
+  const ctJobIsTerminal = ctJob?.status === "completed" ||
+    ctJob?.status === "failed" ||
+    ctJob?.status === "quality_insufficient";
+  const action: PlannedAction = !ctInput || ctJobIsTerminal
+    ? state.tool_outputs.rag_search
+      ? "generate_draft"
+      : "rag_search"
+    : ctJob
+      ? "collect_ct_result"
+      : "submit_ct_job";
   appendRunEvent(runtime.repository, state, "assessment.react.planned", {
     action,
     react_turn_count: currentReactTurns + 1,
@@ -722,6 +742,12 @@ async function reactActNode(
   if (state.planned_action === "rag_search") {
     return { ...await retrieveRag(state, runtime), next: "react_observe" };
   }
+  if (state.planned_action === "submit_ct_job") {
+    return { ...await submitCtJob(state, runtime), next: "react_observe" };
+  }
+  if (state.planned_action === "collect_ct_result") {
+    return { ...await collectCtResult(state, runtime), next: "react_observe" };
+  }
   if (state.planned_action === "generate_draft") {
     return { ...await runReportToolchain(state, runtime), next: "react_observe" };
   }
@@ -736,6 +762,7 @@ async function reactObserveNode(
     action: state.planned_action ?? null,
     has_rag: state.tool_outputs.rag_search !== undefined,
     has_report: state.report !== undefined,
+    ct_job_status: state.tool_outputs.imaging_jobs?.ct?.status ?? null,
   });
   return { ...state, next: "react_decide" };
 }
@@ -744,13 +771,84 @@ async function reactDecideNode(
   state: AssessmentRunState,
   runtime: AssessmentGraphRuntime,
 ): Promise<AssessmentRunState> {
-  if (state.planned_action === "rag_search") {
+  if (
+    state.planned_action === "rag_search" ||
+    state.planned_action === "submit_ct_job" ||
+    state.planned_action === "collect_ct_result"
+  ) {
     return { ...state, next: "react_plan" };
   }
   if (state.planned_action !== "generate_draft") {
     return failState(state, "ReAct decision has no completed draft action.");
   }
   return finalizeReportState(state, runtime);
+}
+
+async function submitCtJob(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  const input = runtime.repository
+    .listCaseInputs(state.case_id)
+    .find((item) => item.input_type === "ct_report");
+  if (!input) return failState(state, "ReAct CT submission requires a CT report input.");
+
+  const job = await runtime.callTool(
+    state,
+    "submit_ct_job",
+    { input_id: input.input_id, run_id: state.run_id },
+    ({ input_id, run_id }) =>
+      submitMockImagingJob({
+        repository: runtime.repository,
+        run_id,
+        input_id,
+        kind: "ct",
+        now: runtime.now(),
+      }),
+  );
+  return withCtJob(state, job);
+}
+
+async function collectCtResult(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  const job = state.tool_outputs.imaging_jobs?.ct ?? runtime.repository
+    .listImagingToolJobsForRun(state.run_id)
+    .find((item) => item.kind === "ct");
+  if (!job) return failState(state, "ReAct CT collection requires a submitted CT job.");
+
+  const completed = await runtime.callTool(
+    state,
+    "collect_ct_result",
+    { job_id: job.job_id },
+    ({ job_id }) => collectMockImagingJob({
+      repository: runtime.repository,
+      job_id,
+      now: runtime.now(),
+    }),
+  );
+  return withCtJob(state, completed);
+}
+
+function withCtJob(
+  state: AssessmentRunState,
+  job: { job_id: string; status: "queued" | "running" | "completed" | "failed" | "quality_insufficient"; result_evidence_ids: string[] },
+): AssessmentRunState {
+  return {
+    ...state,
+    tool_outputs: {
+      ...state.tool_outputs,
+      imaging_jobs: {
+        ...state.tool_outputs.imaging_jobs,
+        ct: {
+          job_id: job.job_id,
+          status: job.status,
+          result_evidence_ids: job.result_evidence_ids,
+        },
+      },
+    },
+  };
 }
 
 function finalizeReportState(
