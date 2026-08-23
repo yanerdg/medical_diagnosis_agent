@@ -12,6 +12,8 @@
     "eval:safety": "vitest run src/eval"
   },
   "dependencies": {
+    "@langchain/langgraph": "^1.4.12",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.4",
     "better-sqlite3": "^12.11.1",
     "mammoth": "^1.12.1",
     "next": "^15.3.0",

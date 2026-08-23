@@ -50,7 +50,7 @@ curl.exe -X POST http://localhost:3000/api/knowledge-documents `
   -F "knowledge_version=rag-v1"
 ```
 
-导入成功后，`rag_search` 会优先使用通过审核的 SQLite 知识版本，混合 FTS5/BM25 与本地向量召回；本地 embedding 服务不可用时，会保留关键词召回。运行与故障边界见 [docs/RAG_ROADMAP.md](docs/RAG_ROADMAP.md)。
+导入成功后，`rag_search` 会优先使用通过审核的 SQLite 知识版本，混合 SQLite BM25 词法召回与本地向量召回；本地 embedding 服务不可用时，会保留 BM25 召回。运行与故障边界见 [docs/RAG_ROADMAP.md](docs/RAG_ROADMAP.md)。
 
 面向 LangGraph、病例上下文、跨来源冲突检测、CT/WSI 工具接入和恢复控制的实施路线见 [docs/ORCHESTRATION_CONTEXT_UPGRADE_GUIDE.md](docs/ORCHESTRATION_CONTEXT_UPGRADE_GUIDE.md)。
 
