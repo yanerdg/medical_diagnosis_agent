@@ -131,9 +131,9 @@ export function createAssessmentGraph(
         name: "deterministic_rule_trace",
         invoke: (state) => deterministicRuleTraceNode(state, runtime),
       },
-      conflict_check: {
-        name: "conflict_check",
-        invoke: (state) => conflictCheckNode(state, runtime),
+      preflight_conflict_check: {
+        name: "preflight_conflict_check",
+        invoke: (state) => preflightConflictCheckNode(state, runtime),
       },
       clarification_gate: {
         name: "clarification_gate",
@@ -144,13 +144,9 @@ export function createAssessmentGraph(
       react_observe: { name: "react_observe", invoke: (state) => reactObserveNode(state, runtime) },
       context_refresh: { name: "context_refresh", invoke: (state) => contextRefreshNode(state, runtime) },
       react_decide: { name: "react_decide", invoke: (state) => reactDecideNode(state) },
-      verifier_rag_entailment: {
-        name: "verifier_rag_entailment",
-        invoke: (state) => verifierRagEntailmentNode(state, runtime),
-      },
-      verifier_final_evidence: {
-        name: "verifier_final_evidence",
-        invoke: (state) => verifierFinalEvidenceNode(state, runtime),
+      final_conflict_summary: {
+        name: "final_conflict_summary",
+        invoke: (state) => finalConflictSummaryNode(state, runtime),
       },
     },
   };
@@ -376,29 +372,27 @@ function createDurableAssessmentGraph(
     .addNode("pathology_gate", invoke("pathology_gate"))
     .addNode("missing_evidence_check", invoke("missing_evidence_check"))
     .addNode("deterministic_rule_trace", invoke("deterministic_rule_trace"))
-    .addNode("conflict_check", invoke("conflict_check"))
+    .addNode("preflight_conflict_check", invoke("preflight_conflict_check"))
     .addNode("clarification_gate", invoke("clarification_gate"))
     .addNode("react_plan", invoke("react_plan"))
     .addNode("react_act", invoke("react_act"))
     .addNode("react_observe", invoke("react_observe"))
     .addNode("context_refresh", invoke("context_refresh"))
     .addNode("react_decide", invoke("react_decide"))
-    .addNode("verifier_rag_entailment", invoke("verifier_rag_entailment"))
-    .addNode("verifier_final_evidence", invoke("verifier_final_evidence"))
+    .addNode("final_conflict_summary", invoke("final_conflict_summary"))
     .addEdge(START, "intake_validation")
     .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("missing_evidence_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("deterministic_rule_trace", (state) => routeDurableNext(state.assessment.next))
-    .addConditionalEdges("conflict_check", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("preflight_conflict_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("clarification_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_plan", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_act", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_observe", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("context_refresh", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_decide", (state) => routeDurableNext(state.assessment.next))
-    .addConditionalEdges("verifier_rag_entailment", (state) => routeDurableNext(state.assessment.next))
-    .addConditionalEdges("verifier_final_evidence", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("final_conflict_summary", (state) => routeDurableNext(state.assessment.next))
     .compile({ checkpointer: createAssessmentCheckpointer(checkpointPath) });
 }
 
@@ -641,7 +635,7 @@ async function deterministicRuleTraceNode(
       .filter((trace) => trace.outcome === "warning")
       .map((trace) => trace.rule_id),
   });
-  return { ...state, next: "conflict_check" };
+  return { ...state, next: "preflight_conflict_check" };
 }
 
 function ruleTrace(
@@ -667,13 +661,35 @@ function toTraceJson(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
-async function conflictCheckNode(
+async function preflightConflictCheckNode(
   state: AssessmentRunState,
   runtime: AssessmentGraphRuntime,
 ): Promise<AssessmentRunState> {
   if (!state.structure) {
-    return failState(state, "No specialty structure is available for conflict check");
+    return failState(state, "No specialty structure is available for preflight conflict check");
   }
+
+  const rag = state.tool_outputs.rag_search;
+  const ragConflicts = rag
+    ? detectRagCitationConflicts({
+        case_id: state.case_id,
+        structure: state.structure,
+        citations: rag.citations,
+        created_at: runtime.now(),
+      })
+    : [];
+  runtime.repository.saveClinicalConflicts(ragConflicts);
+  const excludedCitationIds = new Set(
+    ragConflicts.flatMap((conflict) => conflict.right_evidence_ids),
+  );
+  const safeRag = rag && excludedCitationIds.size > 0
+    ? {
+        ...rag,
+        citations: rag.citations.filter(
+          (citation) => !excludedCitationIds.has(citation.citation_id),
+        ),
+      }
+    : rag;
 
   const contextBundle = new ClinicalContextManager(runtime.repository).build({
     case_id: state.case_id,
@@ -685,14 +701,17 @@ async function conflictCheckNode(
     (conflict) =>
       conflict.severity === "blocking" && conflict.blocks.includes("assessment"),
   );
-  appendRunEvent(runtime.repository, state, "assessment.conflict.checked", {
+  appendRunEvent(runtime.repository, state, "assessment.preflight_conflict.checked", {
     unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
     blocking_conflict_ids: blockingConflicts.map((conflict) => conflict.conflict_id),
+    rag_conflict_ids: ragConflicts.map((conflict) => conflict.conflict_id),
+    excluded_citation_ids: [...excludedCitationIds],
   });
 
   return {
     ...state,
     context_bundle: contextBundle,
+    tool_outputs: safeRag ? { ...state.tool_outputs, rag_search: safeRag } : state.tool_outputs,
     next: "clarification_gate",
     missing_evidence: dedupeMissingEvidence([
       ...state.missing_evidence,
@@ -879,46 +898,35 @@ async function contextRefreshNode(
 
 async function reactDecideNode(state: AssessmentRunState): Promise<AssessmentRunState> {
   if (
-    state.planned_action === "rag_search" ||
     state.planned_action === "submit_ct_job" ||
     state.planned_action === "collect_ct_result"
   ) {
     return { ...state, next: "react_plan" };
   }
+  if (state.planned_action === "rag_search") {
+    return { ...state, next: "preflight_conflict_check" };
+  }
   if (state.planned_action !== "generate_draft") {
     return failState(state, "ReAct decision has no completed draft action.");
   }
-  return { ...state, next: "verifier_rag_entailment" };
+  return { ...state, next: "final_conflict_summary" };
 }
 
-async function verifierRagEntailmentNode(
+async function finalConflictSummaryNode(
   state: AssessmentRunState,
   runtime: AssessmentGraphRuntime,
 ): Promise<AssessmentRunState> {
   if (!state.structure || !state.report) {
-    return failState(state, "RAG entailment verification requires a structure and draft report.");
+    return failState(state, "Final conflict summary requires a structure and draft report.");
   }
-  const conflicts = detectRagClaimEntailmentConflicts({
+  const entailmentConflicts = detectRagClaimEntailmentConflicts({
     case_id: state.case_id,
     structure: state.structure,
     report: state.report,
     citations: state.tool_outputs.rag_search?.citations ?? [],
     created_at: runtime.now(),
   });
-  runtime.repository.saveClinicalConflicts(conflicts);
-  appendRunEvent(runtime.repository, state, "assessment.verifier.rag_entailment.checked", {
-    conflict_ids: conflicts.map((conflict) => conflict.conflict_id),
-  });
-  return { ...state, next: "verifier_final_evidence" };
-}
-
-async function verifierFinalEvidenceNode(
-  state: AssessmentRunState,
-  runtime: AssessmentGraphRuntime,
-): Promise<AssessmentRunState> {
-  if (!state.structure || !state.report) {
-    return failState(state, "Final evidence verification requires a structure and draft report.");
-  }
+  runtime.repository.saveClinicalConflicts(entailmentConflicts);
   const contextBundle = new ClinicalContextManager(runtime.repository).build({
     case_id: state.case_id,
     run_id: state.run_id,
@@ -936,6 +944,7 @@ async function verifierFinalEvidenceNode(
   const finalBlockingConflicts = [
     ...contextBundle.unresolved_conflicts,
     ...integrityConflicts,
+    ...entailmentConflicts,
   ].filter(
     (conflict) => conflict.blocks.includes("final_report") && conflict.severity !== "low",
   );
@@ -953,9 +962,10 @@ async function verifierFinalEvidenceNode(
         verifier_issues: [...validation.verifier_issues, ...conflictIssues],
       }
     : validation;
-  appendRunEvent(runtime.repository, state, "assessment.verifier.final_evidence.checked", {
+  appendRunEvent(runtime.repository, state, "assessment.final_conflict_summary.checked", {
     blocking_conflict_ids: finalBlockingConflicts.map((conflict) => conflict.conflict_id),
     evidence_integrity_conflict_ids: integrityConflicts.map((conflict) => conflict.conflict_id),
+    rag_entailment_conflict_ids: entailmentConflicts.map((conflict) => conflict.conflict_id),
   });
   return finalizeReportState({
     ...state,
@@ -1179,30 +1189,10 @@ async function retrieveRag(
     { structure: state.structure, missing_evidence: state.missing_evidence },
     WHITELISTED_ASSESSMENT_TOOLS.rag_search,
   );
-  const conflicts = detectRagCitationConflicts({
-    case_id: state.case_id,
-    structure: state.structure,
-    citations: rag.citations,
-    created_at: runtime.now(),
-  });
-  runtime.repository.saveClinicalConflicts(conflicts);
-  const excludedCitationIds = new Set(
-    conflicts.flatMap((conflict) => conflict.right_evidence_ids),
-  );
-  const safeRag = {
-    ...rag,
-    citations: rag.citations.filter(
-      (citation) => !excludedCitationIds.has(citation.citation_id),
-    ),
-  };
-  appendRunEvent(runtime.repository, state, "assessment.rag.conflict_checked", {
-    conflict_ids: conflicts.map((conflict) => conflict.conflict_id),
-    excluded_citation_ids: [...excludedCitationIds],
-  });
   return {
     ...state,
-    knowledge_version: safeRag.version,
-    tool_outputs: { ...state.tool_outputs, rag_search: safeRag },
+    knowledge_version: rag.version,
+    tool_outputs: { ...state.tool_outputs, rag_search: rag },
   };
 }
 
@@ -1447,15 +1437,14 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "pathology_gate",
     "missing_evidence_check",
     "deterministic_rule_trace",
-    "conflict_check",
+    "preflight_conflict_check",
     "clarification_gate",
     "react_plan",
     "react_act",
     "react_observe",
     "context_refresh",
     "react_decide",
-    "verifier_rag_entailment",
-    "verifier_final_evidence",
+    "final_conflict_summary",
   ].includes(next);
 }
 

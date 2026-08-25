@@ -222,7 +222,7 @@ START
   → intake_validation
   → required_information_check
   → deterministic_rule_trace
-  → conflict_check
+  → preflight_conflict_check
   → gate: blocking gap/conflict?
        ├─ yes → clarification_interrupt → Command(resume) → hydrate_context
        └─ no  → react_plan
@@ -237,7 +237,7 @@ react_plan → react_act → react_observe → context_refresh → react_decide
 verifier_chain
   → claim_to_evidence_check
   → rag_provenance_check
-  → cross_modality_final_check
+  → final_conflict_summary
   → output_schema_check
   → safety_gate
   → save_report → END
@@ -247,7 +247,8 @@ verifier_chain
 
 - `required_information_check`：生成缺失项、临床用途、阻断等级和可追问性。
 - `deterministic_rule_trace`：执行病理、红旗、耐受性、时间时效等规则并保存 trace。
-- `conflict_check`：生成或更新 `ConflictItem`。
+- `preflight_conflict_check`：草稿前检查病例事实、已有证据和已检索 RAG；阻断性冲突进入追问，不适用引用在生成草稿前剔除。
+- `final_conflict_summary`：草稿后汇总 RAG 蕴含、主张—证据、事实可回查性和所有最终报告冲突。
 - `clarification_interrupt`：保存结构化问题并暂停；不在暂停状态绕过证据缺口。
 - `verifier_chain`：验证最终主张与病例证据、RAG 引用、冲突状态是否一致。
 
@@ -349,7 +350,7 @@ type AssessmentGraphState = {
 2. 为病理、红旗、实验室时效、治疗状态、RAG 来源适用性实现确定性规则。
 3. 增加冲突持久化、医生裁决和 `clarification_interrupt`。
 
-当前完成状态：`deterministic_rule_trace` 与 `conflict_check` 已作为显式图节点运行；前者按病例结构、实验室完整性、分期完整性和结构化矛盾生成幂等 SQLite trace，后者将 blocking 冲突转成可审计的医生追问并触发 `clarification_interrupt`。医生必须显式选择冲突裁决方向或“未知”，该选择随追问回答持久化；同一结构刷新时只替换结构检测器自身的未解决冲突，不会删除 RAG 或主张证据冲突。图状态只携带 `ContextBundle` 的有界原文摘录。RAG 引用的癌种适用范围与审核状态已纳入冲突留痕，并会在报告前剔除不合格引用；非不确定性的敏感性主张必须同时具备病例侧与已审核知识证据，否则报告会被拒绝并记录 `claim_evidence` 冲突。引用片段的语义蕴含与 CT/WSI 冲突仍待接入。
+当前完成状态：`deterministic_rule_trace`、`preflight_conflict_check` 与 `final_conflict_summary` 已作为显式图节点运行。前置冲突节点在初始资料和 RAG 检索后复用：阻断病例冲突会进入可审计医生追问，不适用/未审核引用会在生成草稿前剔除；后置节点在草稿后集中汇总 RAG 蕴含、主张—证据、事实可回查性及最终报告冲突。医生必须显式选择冲突裁决方向或“未知”，该选择随追问回答持久化；同一结构刷新时只替换结构检测器自身的未解决冲突，不会删除 RAG 或主张证据冲突。CT/WSI 冲突仍待其结构化输出接入后处理。
 
 ### 阶段 C：LangGraph 与恢复控制
 

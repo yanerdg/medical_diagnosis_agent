@@ -24,15 +24,14 @@ export type AssessmentNodeName =
   | "pathology_gate"
   | "missing_evidence_check"
   | "deterministic_rule_trace"
-  | "conflict_check"
+  | "preflight_conflict_check"
   | "clarification_gate"
   | "react_plan"
   | "react_act"
   | "react_observe"
   | "context_refresh"
   | "react_decide"
-  | "verifier_rag_entailment"
-  | "verifier_final_evidence";
+  | "final_conflict_summary";
 
 export type AssessmentGraphTerminal = "completed" | "paused" | "failed";
 

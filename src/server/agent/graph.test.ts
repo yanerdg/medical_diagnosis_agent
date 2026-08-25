@@ -90,15 +90,15 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(18);
+    ).toHaveLength(19);
     expect(repository.listDeterministicRuleTraces(result.run.run_id)).toHaveLength(4);
     expect(events.map((event) => event.event_type)).toEqual(
       expect.arrayContaining([
         "assessment.react.planned",
         "assessment.react.observed",
         "assessment.context.refreshed",
-        "assessment.verifier.rag_entailment.checked",
-        "assessment.verifier.final_evidence.checked",
+        "assessment.preflight_conflict.checked",
+        "assessment.final_conflict_summary.checked",
       ]),
     );
     expect(events.map((event) => event.sequence)).toEqual(
@@ -167,7 +167,7 @@ describe("assessment agent graph", () => {
     expect(
       repository
         .listRunEvents(result.run.run_id)
-        .some((event) => event.event_type === "assessment.conflict.checked"),
+        .some((event) => event.event_type === "assessment.preflight_conflict.checked"),
     ).toBe(true);
   });
 
