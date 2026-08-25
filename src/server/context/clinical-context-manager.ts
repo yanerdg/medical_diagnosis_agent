@@ -61,24 +61,40 @@ export class ClinicalContextManager {
       repository: this.repository,
     });
 
+    const coreFactCard = facts.filter((fact) => CORE_FACT_KEYS.has(fact.fact_key));
+    const taskFacts = selectTaskFacts(facts, params.profile);
+    const unresolvedConflicts = this.repository.listUnresolvedClinicalConflicts(params.case_id);
+    const toolJobs = this.repository.listImagingToolJobsForRun(params.run_id).map((job) => ({
+      job_id: job.job_id,
+      kind: job.kind,
+      status: job.status,
+      model_version: job.model_version,
+      result_evidence_ids: job.result_evidence_ids,
+    }));
+    const sourceExcerpts = this.loadBoundedExcerpts(params.case_id, params.profile);
+    const manifest = buildContextManifest({
+      profile: params.profile,
+      sourceFingerprint: memory.status.sourceFingerprint,
+      coreFactCard,
+      taskFacts,
+      unresolvedConflicts,
+      sourceExcerpts,
+      toolJobs,
+    });
+
     return {
       case_id: params.case_id,
       run_id: params.run_id,
       clinical_snapshot_id: this.repository.getLatestPatientMemorySnapshot(params.case_id)?.snapshot_id,
       source_fingerprint: memory.status.sourceFingerprint,
       profile: params.profile,
-      core_fact_card: facts.filter((fact) => CORE_FACT_KEYS.has(fact.fact_key)),
-      task_facts: selectTaskFacts(facts, params.profile),
-      unresolved_conflicts: this.repository.listUnresolvedClinicalConflicts(params.case_id),
+      core_fact_card: coreFactCard,
+      task_facts: taskFacts,
+      unresolved_conflicts: unresolvedConflicts,
       patient_memory: memory.memory,
-      tool_jobs: this.repository.listImagingToolJobsForRun(params.run_id).map((job) => ({
-        job_id: job.job_id,
-        kind: job.kind,
-        status: job.status,
-        model_version: job.model_version,
-        result_evidence_ids: job.result_evidence_ids,
-      })),
-      source_excerpts: this.loadBoundedExcerpts(params.case_id, params.profile),
+      tool_jobs: toolJobs,
+      source_excerpts: sourceExcerpts,
+      manifest,
     };
   }
 
@@ -104,6 +120,36 @@ export class ClinicalContextManager {
         }] : [];
       });
   }
+}
+
+function buildContextManifest(params: {
+  profile: ContextProfile;
+  sourceFingerprint: string;
+  coreFactCard: ClinicalFact[];
+  taskFacts: ClinicalFact[];
+  unresolvedConflicts: import("./types").ConflictItem[];
+  sourceExcerpts: SourceExcerpt[];
+  toolJobs: ContextBundle["tool_jobs"];
+}): ContextBundle["manifest"] {
+  const selected = {
+    core_facts: params.coreFactCard,
+    task_facts: params.taskFacts,
+    conflicts: params.unresolvedConflicts.map((item) => item.conflict_id),
+    source_excerpts: params.sourceExcerpts.map((item) => item.input_id),
+    tool_jobs: params.toolJobs.map((item) => item.job_id),
+  };
+  return {
+    profile: params.profile,
+    source_fingerprint: params.sourceFingerprint,
+    core_fact_ids: params.coreFactCard.map((item) => item.fact_id),
+    task_fact_ids: params.taskFacts.map((item) => item.fact_id),
+    unresolved_conflict_ids: params.unresolvedConflicts.map((item) => item.conflict_id),
+    source_input_ids: params.sourceExcerpts.map((item) => item.input_id),
+    tool_job_ids: params.toolJobs.map((item) => item.job_id),
+    estimated_tokens: Math.ceil(JSON.stringify(selected).length / 4),
+    budget_tokens: 6500,
+    selection_policy: "core safety facts + profile-specific facts + unresolved conflicts + bounded excerpts + tool states",
+  };
 }
 
 function factsFromStructure(structure: SpecialtyStructure): CreateClinicalFactParams[] {

@@ -217,11 +217,7 @@ export async function runAssessmentGraph(
       initialState.acknowledged_missing_evidence_codes,
     context: contextBundle
       ? {
-          source_fingerprint: contextBundle.source_fingerprint,
-          core_fact_count: contextBundle.core_fact_card.length,
-          task_fact_count: contextBundle.task_facts.length,
-          excerpt_count: contextBundle.source_excerpts.length,
-          unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
+          manifest: contextBundle.manifest,
         }
       : null,
   });
@@ -434,6 +430,7 @@ async function invokeDurableNode(
   appendRunEvent(runtime.repository, startedState, "assessment.node.started", {
     node: nodeName,
     loop_count: startedState.loop_count,
+    context_manifest: startedState.context_bundle?.manifest ?? null,
   });
   try {
     const nextState = await invoke(startedState);
@@ -874,13 +871,7 @@ async function contextRefreshNode(
     profile: "react_planner",
   });
   appendRunEvent(runtime.repository, state, "assessment.context.refreshed", {
-    source_fingerprint: contextBundle.source_fingerprint,
-    unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
-    tool_jobs: contextBundle.tool_jobs.map((job) => ({
-      job_id: job.job_id,
-      kind: job.kind,
-      status: job.status,
-    })),
+    manifest: contextBundle.manifest,
   });
   return { ...state, context_bundle: contextBundle, next: "react_decide" };
 }

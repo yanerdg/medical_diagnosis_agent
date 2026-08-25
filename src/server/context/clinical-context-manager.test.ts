@@ -73,6 +73,12 @@ describe("ClinicalContextManager", () => {
     );
     expect(repository.listClinicalFacts(structure.case_id, structure.structure_id).length).toBeGreaterThan(0);
     expect(repository.listUnresolvedClinicalConflicts(structure.case_id)).toHaveLength(1);
+    expect(context.manifest).toMatchObject({
+      profile: "react_planner",
+      estimated_tokens: expect.any(Number),
+      budget_tokens: 6500,
+      selection_policy: expect.stringContaining("core safety facts"),
+    });
 
     const conflict = repository.listUnresolvedClinicalConflicts(structure.case_id)[0];
     repository.resolveClinicalConflict({

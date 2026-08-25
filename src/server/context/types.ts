@@ -61,6 +61,19 @@ export type ConflictItem = z.infer<typeof conflictItemSchema>;
 export type ContextProfile = z.infer<typeof contextProfileSchema>;
 export type SourceExcerpt = z.infer<typeof sourceExcerptSchema>;
 
+export type ContextManifest = {
+  profile: ContextProfile;
+  source_fingerprint: string;
+  core_fact_ids: string[];
+  task_fact_ids: string[];
+  unresolved_conflict_ids: string[];
+  source_input_ids: string[];
+  tool_job_ids: string[];
+  estimated_tokens: number;
+  budget_tokens: number;
+  selection_policy: string;
+};
+
 export type ContextBundle = {
   case_id: string;
   run_id: string;
@@ -79,6 +92,7 @@ export type ContextBundle = {
     result_evidence_ids: string[];
   }>;
   source_excerpts: SourceExcerpt[];
+  manifest: ContextManifest;
 };
 
 export type CreateClinicalFactParams = Omit<ClinicalFact, "fact_id" | "created_at" | "updated_at"> &
