@@ -201,6 +201,17 @@ CREATE TABLE IF NOT EXISTS run_events (
   UNIQUE (run_id, sequence)
 );
 
+CREATE TABLE IF NOT EXISTS deterministic_rule_traces (
+  rule_trace_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES assessment_runs(run_id) ON DELETE CASCADE,
+  rule_id TEXT NOT NULL,
+  evidence_fingerprint TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'warning')),
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (run_id, rule_id, evidence_fingerprint)
+);
+
 CREATE TABLE IF NOT EXISTS assessment_reports (
   report_id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES assessment_runs(run_id) ON DELETE CASCADE,
@@ -320,6 +331,7 @@ CREATE INDEX IF NOT EXISTS evidence_assertions_case_key_idx ON evidence_assertio
 CREATE INDEX IF NOT EXISTS evidence_assertions_source_ref_idx ON evidence_assertions(source_ref);
 CREATE INDEX IF NOT EXISTS clinical_conflicts_case_resolution_idx ON clinical_conflicts(case_id, resolution, severity);
 CREATE INDEX IF NOT EXISTS run_events_run_id_sequence_idx ON run_events(run_id, sequence);
+CREATE INDEX IF NOT EXISTS deterministic_rule_traces_run_id_idx ON deterministic_rule_traces(run_id, created_at);
 CREATE INDEX IF NOT EXISTS assessment_reports_run_id_idx ON assessment_reports(run_id);
 CREATE INDEX IF NOT EXISTS reviews_report_id_idx ON reviews(report_id);
 CREATE INDEX IF NOT EXISTS audit_events_entity_idx ON audit_events(entity_type, entity_id);

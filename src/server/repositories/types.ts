@@ -33,6 +33,16 @@ export type SaveEvidenceAssertionParams = Omit<
 > &
   Partial<Pick<EvidenceAssertion, "assertion_id" | "created_at">>;
 
+export interface DeterministicRuleTrace {
+  rule_trace_id: string;
+  run_id: string;
+  rule_id: string;
+  evidence_fingerprint: string;
+  outcome: "passed" | "warning";
+  details: JsonValue;
+  created_at: string;
+}
+
 export interface RunEvent {
   event_id: string;
   run_id: string;

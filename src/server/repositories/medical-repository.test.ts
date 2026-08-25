@@ -42,6 +42,7 @@ describe("MedicalRepository", () => {
           "patient_memory_snapshots",
         "pending_rough_memory_items",
         "evidence_assertions",
+        "deterministic_rule_traces",
         "specialty_structures",
         "assessment_runs",
         "imaging_tool_jobs",

@@ -23,6 +23,7 @@ export type AssessmentNodeName =
   | "intake_validation"
   | "pathology_gate"
   | "missing_evidence_check"
+  | "deterministic_rule_trace"
   | "conflict_check"
   | "clarification_gate"
   | "react_plan"

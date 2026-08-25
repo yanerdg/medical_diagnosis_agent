@@ -90,7 +90,8 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(13);
+    ).toHaveLength(14);
+    expect(repository.listDeterministicRuleTraces(result.run.run_id)).toHaveLength(4);
     expect(events.map((event) => event.event_type)).toEqual(
       expect.arrayContaining([
         "assessment.react.planned",

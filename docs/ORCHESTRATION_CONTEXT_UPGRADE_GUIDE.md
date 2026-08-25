@@ -349,7 +349,7 @@ type AssessmentGraphState = {
 2. 为病理、红旗、实验室时效、治疗状态、RAG 来源适用性实现确定性规则。
 3. 增加冲突持久化、医生裁决和 `clarification_interrupt`。
 
-当前完成状态：`conflict_check` 已作为显式图节点运行；结构化 blocking 冲突会转成可审计的医生追问并触发 `clarification_interrupt`。医生必须显式选择冲突裁决方向或“未知”，该选择随追问回答持久化；同一结构刷新时只替换结构检测器自身的未解决冲突，不会删除 RAG 或主张证据冲突。图状态只携带 `ContextBundle` 的有界原文摘录。RAG 引用的癌种适用范围与审核状态已纳入冲突留痕，并会在报告前剔除不合格引用；非不确定性的敏感性主张必须同时具备病例侧与已审核知识证据，否则报告会被拒绝并记录 `claim_evidence` 冲突。引用片段的语义蕴含与 CT/WSI 冲突仍待接入。
+当前完成状态：`deterministic_rule_trace` 与 `conflict_check` 已作为显式图节点运行；前者按病例结构、实验室完整性、分期完整性和结构化矛盾生成幂等 SQLite trace，后者将 blocking 冲突转成可审计的医生追问并触发 `clarification_interrupt`。医生必须显式选择冲突裁决方向或“未知”，该选择随追问回答持久化；同一结构刷新时只替换结构检测器自身的未解决冲突，不会删除 RAG 或主张证据冲突。图状态只携带 `ContextBundle` 的有界原文摘录。RAG 引用的癌种适用范围与审核状态已纳入冲突留痕，并会在报告前剔除不合格引用；非不确定性的敏感性主张必须同时具备病例侧与已审核知识证据，否则报告会被拒绝并记录 `claim_evidence` 冲突。引用片段的语义蕴含与 CT/WSI 冲突仍待接入。
 
 ### 阶段 C：LangGraph 与恢复控制
 

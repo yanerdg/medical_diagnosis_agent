@@ -125,6 +125,10 @@ export function createAssessmentGraph(
         name: "missing_evidence_check",
         invoke: (state) => missingEvidenceCheckNode(state, runtime),
       },
+      deterministic_rule_trace: {
+        name: "deterministic_rule_trace",
+        invoke: (state) => deterministicRuleTraceNode(state, runtime),
+      },
       conflict_check: {
         name: "conflict_check",
         invoke: (state) => conflictCheckNode(state, runtime),
@@ -358,6 +362,7 @@ function createDurableAssessmentGraph(
     .addNode("intake_validation", invoke("intake_validation"))
     .addNode("pathology_gate", invoke("pathology_gate"))
     .addNode("missing_evidence_check", invoke("missing_evidence_check"))
+    .addNode("deterministic_rule_trace", invoke("deterministic_rule_trace"))
     .addNode("conflict_check", invoke("conflict_check"))
     .addNode("clarification_gate", invoke("clarification_gate"))
     .addNode("react_plan", invoke("react_plan"))
@@ -368,6 +373,7 @@ function createDurableAssessmentGraph(
     .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("missing_evidence_check", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("deterministic_rule_trace", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("conflict_check", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("clarification_gate", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_plan", (state) => routeDurableNext(state.assessment.next))
@@ -561,7 +567,7 @@ async function missingEvidenceCheckNode(
 
   return {
     ...state,
-    next: "conflict_check",
+    next: "deterministic_rule_trace",
     missing_evidence: dedupeMissingEvidence([
       ...state.missing_evidence,
       ...labMissing,
@@ -574,6 +580,71 @@ async function missingEvidenceCheckNode(
       contradiction_checker: contradictions,
     },
   };
+}
+
+async function deterministicRuleTraceNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure) {
+    return failState(state, "No specialty structure is available for rule tracing");
+  }
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      structure_id: state.structure.structure_id,
+      source_fingerprint: state.context_bundle?.source_fingerprint ?? null,
+      pathology: state.structure.pathology,
+      labs: state.tool_outputs.lab_checker,
+      staging: state.tool_outputs.tnm_mapper,
+      contradictions: state.tool_outputs.contradiction_checker,
+    }))
+    .digest("hex");
+  const traces = [
+    ruleTrace(state, runtime, "pathology.confirmation", fingerprint,
+      state.structure.pathology.status === "confirmed" ? "passed" : "warning",
+      { status: state.structure.pathology.status, evidence_ids: state.structure.pathology.evidence_ids }),
+    ruleTrace(state, runtime, "labs.completeness", fingerprint,
+      (state.tool_outputs.lab_checker?.missing.length ?? 0) === 0 ? "passed" : "warning",
+      toTraceJson(state.tool_outputs.lab_checker ?? { missing: [], available: [], abnormal_clues: [] })),
+    ruleTrace(state, runtime, "staging.completeness", fingerprint,
+      (state.tool_outputs.tnm_mapper?.missing_for_staging.length ?? 0) === 0 ? "passed" : "warning",
+      toTraceJson(state.tool_outputs.tnm_mapper ?? { missing_for_staging: [] })),
+    ruleTrace(state, runtime, "structure.contradictions", fingerprint,
+      (state.tool_outputs.contradiction_checker?.contradictions.length ?? 0) === 0 ? "passed" : "warning",
+      toTraceJson(state.tool_outputs.contradiction_checker ?? { contradictions: [] })),
+  ];
+  runtime.repository.saveDeterministicRuleTraces(traces);
+  appendRunEvent(runtime.repository, state, "assessment.deterministic_rule_trace.recorded", {
+    rule_ids: traces.map((trace) => trace.rule_id),
+    evidence_fingerprint: fingerprint,
+    warning_rule_ids: traces
+      .filter((trace) => trace.outcome === "warning")
+      .map((trace) => trace.rule_id),
+  });
+  return { ...state, next: "conflict_check" };
+}
+
+function ruleTrace(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+  ruleId: string,
+  evidenceFingerprint: string,
+  outcome: "passed" | "warning",
+  details: JsonValue,
+) {
+  return {
+    rule_trace_id: `rule:${state.run_id}:${ruleId}:${evidenceFingerprint.slice(0, 24)}`,
+    run_id: state.run_id,
+    rule_id: ruleId,
+    evidence_fingerprint: evidenceFingerprint,
+    outcome,
+    details,
+    created_at: runtime.now(),
+  };
+}
+
+function toTraceJson(value: unknown): JsonValue {
+  return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
 async function conflictCheckNode(
@@ -1266,6 +1337,7 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "intake_validation",
     "pathology_gate",
     "missing_evidence_check",
+    "deterministic_rule_trace",
     "conflict_check",
     "clarification_gate",
     "react_plan",

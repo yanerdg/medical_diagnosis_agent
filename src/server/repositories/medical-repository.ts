@@ -40,6 +40,7 @@ import type {
   CreateCaseInputFromRawTextParams,
   CreatePendingRoughMemoryItemParams,
   CreateRunEventParams,
+  DeterministicRuleTrace,
   PatientMemorySnapshot,
   PendingRoughMemoryItem,
   RunEvent,
@@ -153,6 +154,10 @@ type ReviewRow = Omit<Review, "comment"> & {
 type RunEventRow = Omit<RunEvent, "message" | "payload"> & {
   message: string | null;
   payload_json: string;
+};
+
+type DeterministicRuleTraceRow = Omit<DeterministicRuleTrace, "details"> & {
+  details_json: string;
 };
 
 type AuditEventRow = Omit<AuditEvent, "actor_id" | "payload"> & {
@@ -768,6 +773,39 @@ export class MedicalRepository {
       .all(runId) as ImagingToolJobRow[];
 
     return rows.map(toImagingToolJob);
+  }
+
+  saveDeterministicRuleTraces(
+    traces: DeterministicRuleTrace[],
+  ): DeterministicRuleTrace[] {
+    const save = this.database.transaction(() => {
+      const statement = this.database.prepare(
+        `
+        INSERT INTO deterministic_rule_traces (
+          rule_trace_id, run_id, rule_id, evidence_fingerprint, outcome,
+          details_json, created_at
+        ) VALUES (
+          @rule_trace_id, @run_id, @rule_id, @evidence_fingerprint, @outcome,
+          @details_json, @created_at
+        ) ON CONFLICT(run_id, rule_id, evidence_fingerprint) DO NOTHING
+        `,
+      );
+      for (const trace of traces) {
+        statement.run({ ...trace, details_json: stringifyJson(trace.details) });
+      }
+    });
+    save();
+    return traces;
+  }
+
+  listDeterministicRuleTraces(runId: string): DeterministicRuleTrace[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM deterministic_rule_traces
+         WHERE run_id = ? ORDER BY created_at ASC, rule_id ASC`,
+      )
+      .all(runId) as DeterministicRuleTraceRow[];
+    return rows.map(toDeterministicRuleTrace);
   }
 
   appendRunEvent(params: CreateRunEventParams): RunEvent {
@@ -1711,6 +1749,20 @@ function toRunEvent(event: Omit<RunEvent, "payload"> & { payload: unknown }): Ru
     ...event,
     message: optionalString(event.message),
     payload: jsonValueSchema.parse(event.payload) as JsonValue,
+  };
+}
+
+function toDeterministicRuleTrace(
+  row: DeterministicRuleTraceRow,
+): DeterministicRuleTrace {
+  return {
+    rule_trace_id: row.rule_trace_id,
+    run_id: row.run_id,
+    rule_id: row.rule_id,
+    evidence_fingerprint: row.evidence_fingerprint,
+    outcome: row.outcome,
+    details: jsonValueSchema.parse(parseJson(row.details_json)) as JsonValue,
+    created_at: row.created_at,
   };
 }
 
