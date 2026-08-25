@@ -21,6 +21,7 @@ import {
   type RunAssessmentGraphResult,
 } from "@/server/agent";
 import { createPendingRoughMemoryForCaseInput } from "@/server/memory/rough-memory";
+import { persistEvidenceModels } from "@/server/evidence/evidence-assertions";
 import type { MedicalRepository } from "@/server/repositories";
 import { randomUUID } from "node:crypto";
 
@@ -169,6 +170,7 @@ export function submitClarificationResponses(params: {
     });
     return resolved ? [resolved.conflict_id] : [];
   });
+  persistEvidenceModels({ repository, evidence });
 
   repository.recordAuditEvent({
     entity_type: "clarification_request",
@@ -346,6 +348,7 @@ function rebuildStructureForResume(
   });
 
   repository.saveSpecialtyStructure(result.structure);
+  persistEvidenceModels({ repository, evidence: result.evidence });
   repository.recordAuditEvent({
     entity_type: "specialty_structure",
     entity_id: result.structure.structure_id,

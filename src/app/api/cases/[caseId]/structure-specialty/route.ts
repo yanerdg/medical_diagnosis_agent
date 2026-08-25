@@ -15,6 +15,7 @@ import {
   applyClinicianCorrections,
   extractSpecialtyStructure,
 } from "@/server/cases/structured-extraction";
+import { persistEvidenceModels } from "@/server/evidence/evidence-assertions";
 import { MedicalRepository } from "@/server/repositories";
 import { NextResponse } from "next/server";
 
@@ -65,6 +66,7 @@ export async function POST(request: Request, context: RouteContext) {
       });
 
       repository.saveSpecialtyStructure(result.structure);
+      persistEvidenceModels({ repository, evidence: result.evidence });
       repository.recordAuditEvent({
         entity_type: "specialty_structure",
         entity_id: result.structure.structure_id,
@@ -103,6 +105,7 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     repository.saveSpecialtyStructure(result.structure);
+    persistEvidenceModels({ repository, evidence: result.evidence });
     repository.recordAuditEvent({
       entity_type: "specialty_structure",
       entity_id: result.structure.structure_id,

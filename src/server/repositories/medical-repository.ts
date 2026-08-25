@@ -6,6 +6,7 @@ import {
   caseSchema,
   clarificationRequestRecordSchema,
   clarificationResponseSchema,
+  evidenceAssertionSchema,
   imagingToolJobSchema,
   reviewSchema,
   specialtyStructureSchema,
@@ -15,6 +16,7 @@ import {
   type CaseRecord,
   type ClarificationRequestRecord,
   type ClarificationResponse,
+  type EvidenceAssertion,
   type ImagingToolJob,
   type Review,
   type SpecialtyStructure,
@@ -42,6 +44,7 @@ import type {
   PendingRoughMemoryItem,
   RunEvent,
   SaveImagingToolJobParams,
+  SaveEvidenceAssertionParams,
   SavePatientMemorySnapshotParams,
 } from "./types";
 
@@ -65,6 +68,18 @@ type ImagingToolJobRow = Omit<
 > & {
   result_evidence_ids_json: string;
   error_message: string | null;
+};
+
+type EvidenceAssertionRow = Omit<
+  EvidenceAssertion,
+  "value" | "source_input_id" | "excerpt" | "observed_at" | "model_version" | "confidence"
+> & {
+  value_json: string;
+  source_input_id: string | null;
+  excerpt: string | null;
+  observed_at: string | null;
+  model_version: string | null;
+  confidence: number | null;
 };
 
 interface ClarificationRequestRow {
@@ -627,6 +642,63 @@ export class MedicalRepository {
       .all(caseId) as AssessmentRunRow[];
 
     return rows.map(toAssessmentRun);
+  }
+
+  saveEvidenceAssertions(
+    params: SaveEvidenceAssertionParams[],
+  ): EvidenceAssertion[] {
+    const assertions = params.map((param) => evidenceAssertionSchema.parse({
+      ...param,
+      assertion_id: param.assertion_id ?? randomUUID(),
+      created_at: param.created_at ?? nowIso(),
+    }));
+    const save = this.database.transaction(() => {
+      const statement = this.database.prepare(
+        `
+        INSERT INTO evidence_assertions (
+          assertion_id, case_id, domain, assertion_key, value_json, polarity,
+          source_type, source_ref, source_input_id, excerpt, observed_at,
+          model_version, confidence, created_at
+        ) VALUES (
+          @assertion_id, @case_id, @domain, @assertion_key, @value_json, @polarity,
+          @source_type, @source_ref, @source_input_id, @excerpt, @observed_at,
+          @model_version, @confidence, @created_at
+        )
+        ON CONFLICT(assertion_id) DO NOTHING
+        `,
+      );
+      for (const assertion of assertions) {
+        statement.run({
+          ...assertion,
+          value_json: stringifyJson(assertion.value),
+          source_input_id: assertion.source_input_id ?? null,
+          excerpt: assertion.excerpt ?? null,
+          observed_at: assertion.observed_at ?? null,
+          model_version: assertion.model_version ?? null,
+          confidence: assertion.confidence ?? null,
+        });
+      }
+    });
+    save();
+    return assertions;
+  }
+
+  getEvidenceAssertion(assertionId: string): EvidenceAssertion | null {
+    const row = this.database
+      .prepare("SELECT * FROM evidence_assertions WHERE assertion_id = ?")
+      .get(assertionId) as EvidenceAssertionRow | undefined;
+    return row ? toEvidenceAssertion(row) : null;
+  }
+
+  listEvidenceAssertions(caseId: string): EvidenceAssertion[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM evidence_assertions
+         WHERE case_id = ?
+         ORDER BY created_at ASC, assertion_id ASC`,
+      )
+      .all(caseId) as EvidenceAssertionRow[];
+    return rows.map(toEvidenceAssertion);
   }
 
   saveImagingToolJob(params: SaveImagingToolJobParams): ImagingToolJob {
@@ -1479,6 +1551,25 @@ function toAssessmentRun(row: AssessmentRunRow): AssessmentRun {
   return assessmentRunSchema.parse({
     ...row,
     structure_id: optionalString(row.structure_id),
+  });
+}
+
+function toEvidenceAssertion(row: EvidenceAssertionRow): EvidenceAssertion {
+  return evidenceAssertionSchema.parse({
+    assertion_id: row.assertion_id,
+    case_id: row.case_id,
+    domain: row.domain,
+    assertion_key: row.assertion_key,
+    value: parseJson(row.value_json),
+    polarity: row.polarity,
+    source_type: row.source_type,
+    source_ref: row.source_ref,
+    source_input_id: optionalString(row.source_input_id),
+    excerpt: optionalString(row.excerpt),
+    observed_at: optionalString(row.observed_at),
+    model_version: optionalString(row.model_version),
+    confidence: row.confidence ?? undefined,
+    created_at: row.created_at,
   });
 }
 

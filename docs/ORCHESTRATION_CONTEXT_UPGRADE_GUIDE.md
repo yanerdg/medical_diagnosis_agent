@@ -341,6 +341,8 @@ type AssessmentGraphState = {
 3. 将现有 `PatientMemorySnapshot` 保留为兼容层，新增事实 ID/来源关联。
 4. 实现 `ClinicalContextManager`，先替换评估图的全量 `source_texts` 读取。
 
+当前完成状态：`ClinicalFact`、`ConflictItem`、`ContextBundle` 与上下文管理器已投入图执行。新增不可变的 SQLite `EvidenceAssertion` 层，结构化提取、医生修正和追问回答产生的既有 `EvidenceModel` 现在以同一 evidence ID 持久化为断言，保留来源输入、原文摘录、置信度与时间；模型输出断言和事实归一化仍待后续接入。
+
 ### 阶段 B：多校验节点
 
 1. 拆出必要信息、规则留痕、冲突检测、证据充分性节点。

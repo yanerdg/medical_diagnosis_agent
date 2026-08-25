@@ -1,4 +1,4 @@
-import type { CaseInputType, ImagingToolJob } from "@/domain/schemas";
+import type { CaseInputType, EvidenceAssertion, ImagingToolJob } from "@/domain/schemas";
 import type { JsonValue } from "@/domain/evidence";
 import type { PatientMemory } from "@/lib/clinical-memory";
 import type {
@@ -26,6 +26,12 @@ export interface CreateCaseInputFromRawTextParams {
 
 export type SaveImagingToolJobParams = Omit<ImagingToolJob, "job_id" | "created_at" | "updated_at"> &
   Partial<Pick<ImagingToolJob, "job_id" | "created_at" | "updated_at">>;
+
+export type SaveEvidenceAssertionParams = Omit<
+  EvidenceAssertion,
+  "assertion_id" | "created_at"
+> &
+  Partial<Pick<EvidenceAssertion, "assertion_id" | "created_at">>;
 
 export interface RunEvent {
   event_id: string;

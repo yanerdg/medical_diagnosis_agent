@@ -2,6 +2,7 @@ export * from "./assessment";
 export * from "./case";
 export * from "./clarification";
 export * from "./common";
+export * from "./evidence-assertion";
 export * from "./input";
 export * from "./imaging-job";
 export * from "./review";

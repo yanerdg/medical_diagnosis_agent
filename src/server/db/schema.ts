@@ -156,6 +156,24 @@ CREATE TABLE IF NOT EXISTS clinical_facts (
   UNIQUE (structure_id, fact_key)
 );
 
+-- Immutable normalized assertions. These are the traceable source layer for facts.
+CREATE TABLE IF NOT EXISTS evidence_assertions (
+  assertion_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  assertion_key TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  polarity TEXT NOT NULL CHECK (polarity IN ('present', 'absent', 'unknown', 'uncertain')),
+  source_type TEXT NOT NULL CHECK (source_type IN ('clinician_input', 'clinician_answer', 'signed_report', 'ct_model', 'wsi_model', 'rag_citation')),
+  source_ref TEXT NOT NULL,
+  source_input_id TEXT REFERENCES case_inputs(input_id) ON DELETE SET NULL,
+  excerpt TEXT,
+  observed_at TEXT,
+  model_version TEXT,
+  confidence REAL CHECK (confidence >= 0 AND confidence <= 1),
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS clinical_conflicts (
   conflict_id TEXT PRIMARY KEY,
   case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
@@ -298,6 +316,8 @@ CREATE INDEX IF NOT EXISTS patient_memory_snapshots_case_id_created_idx ON patie
 CREATE INDEX IF NOT EXISTS patient_memory_snapshots_case_id_valid_idx ON patient_memory_snapshots(case_id, source_fingerprint, is_stale);
 CREATE INDEX IF NOT EXISTS pending_rough_memory_items_case_status_created_idx ON pending_rough_memory_items(case_id, status, created_at);
 CREATE INDEX IF NOT EXISTS clinical_facts_case_structure_idx ON clinical_facts(case_id, structure_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS evidence_assertions_case_key_idx ON evidence_assertions(case_id, assertion_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS evidence_assertions_source_ref_idx ON evidence_assertions(source_ref);
 CREATE INDEX IF NOT EXISTS clinical_conflicts_case_resolution_idx ON clinical_conflicts(case_id, resolution, severity);
 CREATE INDEX IF NOT EXISTS run_events_run_id_sequence_idx ON run_events(run_id, sequence);
 CREATE INDEX IF NOT EXISTS assessment_reports_run_id_idx ON assessment_reports(run_id);
