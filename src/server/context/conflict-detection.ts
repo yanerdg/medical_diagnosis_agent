@@ -1,7 +1,6 @@
-import type { SpecialtyStructure } from "@/domain/schemas";
-import type { AssessmentReportJson } from "@/domain/schemas";
+import type { AssessmentReportJson, EvidenceAssertion, SpecialtyStructure } from "@/domain/schemas";
 import type { KnowledgeCitation } from "@/server/kb/search";
-import type { CreateConflictItemParams } from "./types";
+import type { ClinicalFact, CreateConflictItemParams } from "./types";
 
 export function detectStructureConflicts(params: {
   case_id: string;
@@ -126,6 +125,34 @@ export function detectRagClaimEntailmentConflicts(params: {
       description: `敏感性主张 ${claim.modality} 缺少能够支持该治疗方式的 RAG 引文内容或标签。`,
       resolution: "unresolved" as const,
       blocks: ["draft_report", "final_report"] as const,
+      created_at: params.created_at,
+    }];
+  });
+}
+
+export function detectClinicalFactEvidenceIntegrityConflicts(params: {
+  case_id: string;
+  structure: SpecialtyStructure;
+  facts: ClinicalFact[];
+  assertions: EvidenceAssertion[];
+  created_at: string;
+}): CreateConflictItemParams[] {
+  const assertionIds = new Set(params.assertions.map((assertion) => assertion.assertion_id));
+  return params.facts.flatMap((fact) => {
+    const missingEvidenceIds = fact.evidence_ids.filter((evidenceId) => !assertionIds.has(evidenceId));
+    if (missingEvidenceIds.length === 0) return [];
+    return [{
+      conflict_id: `${params.structure.structure_id}:evidence-integrity:${fact.fact_key}`,
+      case_id: params.case_id,
+      structure_id: params.structure.structure_id,
+      category: "fact" as const,
+      severity: "high" as const,
+      field: fact.fact_key,
+      left_evidence_ids: fact.evidence_ids,
+      right_evidence_ids: missingEvidenceIds,
+      description: `临床事实 ${fact.fact_key} 引用了无法回查的证据 ID，不能作为最终报告依据。`,
+      resolution: "unresolved" as const,
+      blocks: ["final_report"] as const,
       created_at: params.created_at,
     }];
   });

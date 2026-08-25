@@ -18,6 +18,7 @@ import {
 import {
   ClinicalContextManager,
   type CreateConflictItemParams,
+  detectClinicalFactEvidenceIntegrityConflicts,
   detectRagClaimEntailmentConflicts,
   detectRagCitationConflicts,
   type ConflictItem,
@@ -924,7 +925,18 @@ async function verifierFinalEvidenceNode(
     structure: state.structure,
     profile: "verifier",
   });
-  const finalBlockingConflicts = contextBundle.unresolved_conflicts.filter(
+  const integrityConflicts = detectClinicalFactEvidenceIntegrityConflicts({
+    case_id: state.case_id,
+    structure: state.structure,
+    facts: runtime.repository.listClinicalFacts(state.case_id, state.structure.structure_id),
+    assertions: runtime.repository.listEvidenceAssertions(state.case_id),
+    created_at: runtime.now(),
+  });
+  runtime.repository.saveClinicalConflicts(integrityConflicts);
+  const finalBlockingConflicts = [
+    ...contextBundle.unresolved_conflicts,
+    ...integrityConflicts,
+  ].filter(
     (conflict) => conflict.blocks.includes("final_report") && conflict.severity !== "low",
   );
   const validation = state.tool_outputs.output_schema_validator;
@@ -943,6 +955,7 @@ async function verifierFinalEvidenceNode(
     : validation;
   appendRunEvent(runtime.repository, state, "assessment.verifier.final_evidence.checked", {
     blocking_conflict_ids: finalBlockingConflicts.map((conflict) => conflict.conflict_id),
+    evidence_integrity_conflict_ids: integrityConflicts.map((conflict) => conflict.conflict_id),
   });
   return finalizeReportState({
     ...state,

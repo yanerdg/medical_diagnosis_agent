@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SpecialtyStructure } from "@/domain/schemas";
 import type { KnowledgeCitation } from "@/server/kb/search";
-import { detectRagCitationConflicts, detectRagClaimEntailmentConflicts } from "./conflict-detection";
+import { detectClinicalFactEvidenceIntegrityConflicts, detectRagCitationConflicts, detectRagClaimEntailmentConflicts } from "./conflict-detection";
 
 const createdAt = "2026-08-23T00:00:00.000Z";
 
@@ -51,6 +51,20 @@ it("rejects a treatment sensitivity claim without modality-entailing RAG content
     citations: [citation({ citation_id: "citation-radiotherapy", text_chunk: "放疗可作为治疗选择。" })], created_at: createdAt,
   });
   expect(conflicts).toEqual([expect.objectContaining({ severity: "high", field: "sensitivity_assessment.immunotherapy" })]);
+});
+
+it("flags a clinical fact whose evidence identifier cannot be traced", () => {
+  const conflicts = detectClinicalFactEvidenceIntegrityConflicts({
+    case_id: "case-rag-conflict", structure: structure(), assertions: [], created_at: createdAt,
+    facts: [{
+      fact_id: "fact-1", case_id: "case-rag-conflict", structure_id: "structure-rag-conflict",
+      domain: "pathology", fact_key: "pathology.status", value: "confirmed", status: "confirmed",
+      evidence_ids: ["missing-evidence"], source_priority: 100, created_at: createdAt, updated_at: createdAt,
+    }],
+  });
+  expect(conflicts).toEqual([expect.objectContaining({
+    severity: "high", blocks: ["final_report"], right_evidence_ids: ["missing-evidence"],
+  })]);
 });
 
 function structure(): SpecialtyStructure {

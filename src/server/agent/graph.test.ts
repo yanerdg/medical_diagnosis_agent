@@ -296,6 +296,19 @@ describe("assessment agent graph", () => {
       submitted_at: timestamp,
     });
     repository.saveSpecialtyStructure(structure);
+    repository.saveEvidenceAssertions(
+      structure.evidence_ids.map((assertion_id) => ({
+        assertion_id,
+        case_id: caseId,
+        domain: "profile" as const,
+        assertion_key: "test.fixture",
+        value: assertion_id,
+        polarity: "present" as const,
+        source_type: "clinician_input" as const,
+        source_ref: `${caseId}-input`,
+        created_at: timestamp,
+      })),
+    );
   }
 });
 
