@@ -90,12 +90,13 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(16);
+    ).toHaveLength(18);
     expect(repository.listDeterministicRuleTraces(result.run.run_id)).toHaveLength(4);
     expect(events.map((event) => event.event_type)).toEqual(
       expect.arrayContaining([
         "assessment.react.planned",
         "assessment.react.observed",
+        "assessment.context.refreshed",
         "assessment.verifier.rag_entailment.checked",
         "assessment.verifier.final_evidence.checked",
       ]),
@@ -221,6 +222,9 @@ describe("assessment agent graph", () => {
       status: "completed",
       result_evidence_ids: [expect.stringMatching(/^imaging-job:.*:mock-result$/)],
     });
+    expect(result.state.context_bundle?.tool_jobs).toEqual([
+      expect.objectContaining({ kind: "ct", status: "completed" }),
+    ]);
     const plannedActions = repository
       .listRunEvents(result.run.run_id)
       .filter((event) => event.event_type === "assessment.react.planned")

@@ -365,7 +365,7 @@ type AssessmentGraphState = {
 2. 仅让 planner 选择补证手段，不让其裁决病理、红旗或安全门。
 3. 接入 claim-to-evidence、RAG provenance 与最终跨模态校验。
 
-当前完成状态：评估图已在全部确定性门禁之后运行受限的 `react_plan → react_act → react_observe → react_decide` 循环。当前白名单动作包含 `submit_ct_job`、`collect_ct_result`、`rag_search` 与 `generate_draft`，每一步均写入 run event；只有存在 `ct_report` 输入且同一 run 尚无已完成 CT job 时才会选择 CT 动作。草稿后进入 RAG 主张蕴含和最终证据状态校验，未解决的高/阻断级最终报告冲突会拒绝落库。WSI 动作、CT/WSI 结果的结构化事实归一化仍待接入。
+当前完成状态：评估图已在全部确定性门禁之后运行受限的 `react_plan → react_act → react_observe → context_refresh → react_decide` 循环。每次观察后，`context_refresh` 重建有界上下文并带入未解决冲突与任务状态；当前白名单动作包含 `submit_ct_job`、`collect_ct_result`、`rag_search` 与 `generate_draft`，每一步均写入 run event；只有存在 `ct_report` 输入且同一 run 尚无已完成 CT job 时才会选择 CT 动作。草稿后进入 RAG 主张蕴含和最终证据状态校验，未解决的高/阻断级最终报告冲突会拒绝落库。WSI 动作、CT/WSI 结果的结构化事实归一化仍待接入。
 
 ### 阶段 E：CT / WSI 工具
 

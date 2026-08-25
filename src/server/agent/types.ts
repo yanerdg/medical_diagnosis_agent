@@ -29,6 +29,7 @@ export type AssessmentNodeName =
   | "react_plan"
   | "react_act"
   | "react_observe"
+  | "context_refresh"
   | "react_decide"
   | "verifier_rag_entailment"
   | "verifier_final_evidence";

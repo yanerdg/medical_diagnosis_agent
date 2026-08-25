@@ -141,6 +141,7 @@ export function createAssessmentGraph(
       react_plan: { name: "react_plan", invoke: (state) => reactPlanNode(state, runtime) },
       react_act: { name: "react_act", invoke: (state) => reactActNode(state, runtime) },
       react_observe: { name: "react_observe", invoke: (state) => reactObserveNode(state, runtime) },
+      context_refresh: { name: "context_refresh", invoke: (state) => contextRefreshNode(state, runtime) },
       react_decide: { name: "react_decide", invoke: (state) => reactDecideNode(state) },
       verifier_rag_entailment: {
         name: "verifier_rag_entailment",
@@ -232,7 +233,10 @@ export async function runAssessmentGraph(
   );
   const durableResult = await durableGraph.invoke(
     { assessment: initialState },
-    { configurable: { thread_id: runId } },
+    {
+      configurable: { thread_id: runId },
+      recursionLimit: graph.max_loop_count + 4,
+    },
   );
   return finalizeDurableAssessmentResult({
     repository,
@@ -281,7 +285,10 @@ export async function resumeAssessmentGraph(
           params.acknowledged_missing_evidence_codes,
       },
     }),
-    { configurable: { thread_id: params.run_id } },
+    {
+      configurable: { thread_id: params.run_id },
+      recursionLimit: definition.max_loop_count + 4,
+    },
   );
 
   return finalizeDurableAssessmentResult({ repository, run, result });
@@ -377,6 +384,7 @@ function createDurableAssessmentGraph(
     .addNode("react_plan", invoke("react_plan"))
     .addNode("react_act", invoke("react_act"))
     .addNode("react_observe", invoke("react_observe"))
+    .addNode("context_refresh", invoke("context_refresh"))
     .addNode("react_decide", invoke("react_decide"))
     .addNode("verifier_rag_entailment", invoke("verifier_rag_entailment"))
     .addNode("verifier_final_evidence", invoke("verifier_final_evidence"))
@@ -390,6 +398,7 @@ function createDurableAssessmentGraph(
     .addConditionalEdges("react_plan", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_act", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_observe", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("context_refresh", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_decide", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("verifier_rag_entailment", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("verifier_final_evidence", (state) => routeDurableNext(state.assessment.next))
@@ -848,7 +857,32 @@ async function reactObserveNode(
     has_report: state.report !== undefined,
     ct_job_status: state.tool_outputs.imaging_jobs?.ct?.status ?? null,
   });
-  return { ...state, next: "react_decide" };
+  return { ...state, next: "context_refresh" };
+}
+
+async function contextRefreshNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure) {
+    return failState(state, "Context refresh requires a specialty structure.");
+  }
+  const contextBundle = new ClinicalContextManager(runtime.repository).build({
+    case_id: state.case_id,
+    run_id: state.run_id,
+    structure: state.structure,
+    profile: "react_planner",
+  });
+  appendRunEvent(runtime.repository, state, "assessment.context.refreshed", {
+    source_fingerprint: contextBundle.source_fingerprint,
+    unresolved_conflict_count: contextBundle.unresolved_conflicts.length,
+    tool_jobs: contextBundle.tool_jobs.map((job) => ({
+      job_id: job.job_id,
+      kind: job.kind,
+      status: job.status,
+    })),
+  });
+  return { ...state, context_bundle: contextBundle, next: "react_decide" };
 }
 
 async function reactDecideNode(state: AssessmentRunState): Promise<AssessmentRunState> {
@@ -1414,6 +1448,7 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "react_plan",
     "react_act",
     "react_observe",
+    "context_refresh",
     "react_decide",
     "verifier_rag_entailment",
     "verifier_final_evidence",

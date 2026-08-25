@@ -71,6 +71,13 @@ export type ContextBundle = {
   task_facts: ClinicalFact[];
   unresolved_conflicts: ConflictItem[];
   patient_memory: PatientMemory;
+  tool_jobs: Array<{
+    job_id: string;
+    kind: "ct" | "wsi";
+    status: "queued" | "running" | "completed" | "failed" | "quality_insufficient";
+    model_version: string;
+    result_evidence_ids: string[];
+  }>;
   source_excerpts: SourceExcerpt[];
 };
 

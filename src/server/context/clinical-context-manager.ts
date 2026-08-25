@@ -71,6 +71,13 @@ export class ClinicalContextManager {
       task_facts: selectTaskFacts(facts, params.profile),
       unresolved_conflicts: this.repository.listUnresolvedClinicalConflicts(params.case_id),
       patient_memory: memory.memory,
+      tool_jobs: this.repository.listImagingToolJobsForRun(params.run_id).map((job) => ({
+        job_id: job.job_id,
+        kind: job.kind,
+        status: job.status,
+        model_version: job.model_version,
+        result_evidence_ids: job.result_evidence_ids,
+      })),
       source_excerpts: this.loadBoundedExcerpts(params.case_id, params.profile),
     };
   }
