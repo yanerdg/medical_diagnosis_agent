@@ -18,6 +18,7 @@ import {
 import {
   ClinicalContextManager,
   type CreateConflictItemParams,
+  detectRagClaimEntailmentConflicts,
   detectRagCitationConflicts,
   type ConflictItem,
 } from "@/server/context";
@@ -140,7 +141,15 @@ export function createAssessmentGraph(
       react_plan: { name: "react_plan", invoke: (state) => reactPlanNode(state, runtime) },
       react_act: { name: "react_act", invoke: (state) => reactActNode(state, runtime) },
       react_observe: { name: "react_observe", invoke: (state) => reactObserveNode(state, runtime) },
-      react_decide: { name: "react_decide", invoke: (state) => reactDecideNode(state, runtime) },
+      react_decide: { name: "react_decide", invoke: (state) => reactDecideNode(state) },
+      verifier_rag_entailment: {
+        name: "verifier_rag_entailment",
+        invoke: (state) => verifierRagEntailmentNode(state, runtime),
+      },
+      verifier_final_evidence: {
+        name: "verifier_final_evidence",
+        invoke: (state) => verifierFinalEvidenceNode(state, runtime),
+      },
     },
   };
 }
@@ -369,6 +378,8 @@ function createDurableAssessmentGraph(
     .addNode("react_act", invoke("react_act"))
     .addNode("react_observe", invoke("react_observe"))
     .addNode("react_decide", invoke("react_decide"))
+    .addNode("verifier_rag_entailment", invoke("verifier_rag_entailment"))
+    .addNode("verifier_final_evidence", invoke("verifier_final_evidence"))
     .addEdge(START, "intake_validation")
     .addConditionalEdges("intake_validation", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("pathology_gate", (state) => routeDurableNext(state.assessment.next))
@@ -380,6 +391,8 @@ function createDurableAssessmentGraph(
     .addConditionalEdges("react_act", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_observe", (state) => routeDurableNext(state.assessment.next))
     .addConditionalEdges("react_decide", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("verifier_rag_entailment", (state) => routeDurableNext(state.assessment.next))
+    .addConditionalEdges("verifier_final_evidence", (state) => routeDurableNext(state.assessment.next))
     .compile({ checkpointer: createAssessmentCheckpointer(checkpointPath) });
 }
 
@@ -838,10 +851,7 @@ async function reactObserveNode(
   return { ...state, next: "react_decide" };
 }
 
-async function reactDecideNode(
-  state: AssessmentRunState,
-  runtime: AssessmentGraphRuntime,
-): Promise<AssessmentRunState> {
+async function reactDecideNode(state: AssessmentRunState): Promise<AssessmentRunState> {
   if (
     state.planned_action === "rag_search" ||
     state.planned_action === "submit_ct_job" ||
@@ -852,7 +862,68 @@ async function reactDecideNode(
   if (state.planned_action !== "generate_draft") {
     return failState(state, "ReAct decision has no completed draft action.");
   }
-  return finalizeReportState(state, runtime);
+  return { ...state, next: "verifier_rag_entailment" };
+}
+
+async function verifierRagEntailmentNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure || !state.report) {
+    return failState(state, "RAG entailment verification requires a structure and draft report.");
+  }
+  const conflicts = detectRagClaimEntailmentConflicts({
+    case_id: state.case_id,
+    structure: state.structure,
+    report: state.report,
+    citations: state.tool_outputs.rag_search?.citations ?? [],
+    created_at: runtime.now(),
+  });
+  runtime.repository.saveClinicalConflicts(conflicts);
+  appendRunEvent(runtime.repository, state, "assessment.verifier.rag_entailment.checked", {
+    conflict_ids: conflicts.map((conflict) => conflict.conflict_id),
+  });
+  return { ...state, next: "verifier_final_evidence" };
+}
+
+async function verifierFinalEvidenceNode(
+  state: AssessmentRunState,
+  runtime: AssessmentGraphRuntime,
+): Promise<AssessmentRunState> {
+  if (!state.structure || !state.report) {
+    return failState(state, "Final evidence verification requires a structure and draft report.");
+  }
+  const contextBundle = new ClinicalContextManager(runtime.repository).build({
+    case_id: state.case_id,
+    run_id: state.run_id,
+    structure: state.structure,
+    profile: "verifier",
+  });
+  const finalBlockingConflicts = contextBundle.unresolved_conflicts.filter(
+    (conflict) => conflict.blocks.includes("final_report") && conflict.severity !== "low",
+  );
+  const validation = state.tool_outputs.output_schema_validator;
+  const conflictIssues = finalBlockingConflicts.map((conflict) => ({
+    code: `conflict.final.${conflict.conflict_id}`,
+    severity: "error" as const,
+    path: conflict.field,
+    message: `最终报告存在未解决证据冲突：${conflict.description}`,
+  }));
+  const finalValidation = validation
+    ? {
+        ...validation,
+        valid: validation.valid && conflictIssues.length === 0,
+        verifier_issues: [...validation.verifier_issues, ...conflictIssues],
+      }
+    : validation;
+  appendRunEvent(runtime.repository, state, "assessment.verifier.final_evidence.checked", {
+    blocking_conflict_ids: finalBlockingConflicts.map((conflict) => conflict.conflict_id),
+  });
+  return finalizeReportState({
+    ...state,
+    context_bundle: contextBundle,
+    tool_outputs: { ...state.tool_outputs, output_schema_validator: finalValidation },
+  }, runtime);
 }
 
 async function submitCtJob(
@@ -1344,6 +1415,8 @@ function isNodeName(next: AssessmentGraphNext): next is AssessmentNodeName {
     "react_act",
     "react_observe",
     "react_decide",
+    "verifier_rag_entailment",
+    "verifier_final_evidence",
   ].includes(next);
 }
 

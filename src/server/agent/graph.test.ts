@@ -90,12 +90,14 @@ describe("assessment agent graph", () => {
     );
     expect(
       events.filter((event) => event.event_type === "assessment.node.completed"),
-    ).toHaveLength(14);
+    ).toHaveLength(16);
     expect(repository.listDeterministicRuleTraces(result.run.run_id)).toHaveLength(4);
     expect(events.map((event) => event.event_type)).toEqual(
       expect.arrayContaining([
         "assessment.react.planned",
         "assessment.react.observed",
+        "assessment.verifier.rag_entailment.checked",
+        "assessment.verifier.final_evidence.checked",
       ]),
     );
     expect(events.map((event) => event.sequence)).toEqual(

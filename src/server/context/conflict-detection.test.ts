@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SpecialtyStructure } from "@/domain/schemas";
 import type { KnowledgeCitation } from "@/server/kb/search";
-import { detectRagCitationConflicts } from "./conflict-detection";
+import { detectRagCitationConflicts, detectRagClaimEntailmentConflicts } from "./conflict-detection";
 
 const createdAt = "2026-08-23T00:00:00.000Z";
 
@@ -32,6 +32,25 @@ describe("detectRagCitationConflicts", () => {
       ]),
     );
   });
+});
+
+it("rejects a treatment sensitivity claim without modality-entailing RAG content", () => {
+  const report = {
+    case_id: "case-rag-conflict",
+    in_scope: true,
+    assessment_status: "completed" as const,
+    summary: "辅助评估",
+    pending_clarification: null,
+    diagnostic_evidence: { cancer_site: "larynx" as const, pathology_status: "confirmed" as const, pathology_type: "鳞状细胞癌", stage_clues: [], missing_for_staging: [] },
+    sensitivity_assessment: [{ modality: "immunotherapy" as const, level: "possible_sensitive" as const, supporting_evidence: ["病理"], contradicting_evidence: [], missing_information: [], citations: ["citation-radiotherapy"], evidence_ids: ["kb-evidence"] }],
+    tolerance_assessment: [], red_flags: [], recommended_missing_tests: [], evidence: [], overall_confidence: "medium" as const, knowledge_version: "v1", model_version: "test", review_required: true as const,
+    disclaimer: "本结果仅用于医生辅助评估，不能替代病理诊断、MDT 决策、治疗处方或急救处置。" as const,
+  };
+  const conflicts = detectRagClaimEntailmentConflicts({
+    case_id: "case-rag-conflict", structure: structure(), report,
+    citations: [citation({ citation_id: "citation-radiotherapy", text_chunk: "放疗可作为治疗选择。" })], created_at: createdAt,
+  });
+  expect(conflicts).toEqual([expect.objectContaining({ severity: "high", field: "sensitivity_assessment.immunotherapy" })]);
 });
 
 function structure(): SpecialtyStructure {

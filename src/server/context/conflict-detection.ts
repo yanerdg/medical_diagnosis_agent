@@ -1,4 +1,5 @@
 import type { SpecialtyStructure } from "@/domain/schemas";
+import type { AssessmentReportJson } from "@/domain/schemas";
 import type { KnowledgeCitation } from "@/server/kb/search";
 import type { CreateConflictItemParams } from "./types";
 
@@ -92,4 +93,57 @@ export function detectRagCitationConflicts(params: {
     }
     return [];
   });
+}
+
+export function detectRagClaimEntailmentConflicts(params: {
+  case_id: string;
+  structure: SpecialtyStructure;
+  report: AssessmentReportJson;
+  citations: KnowledgeCitation[];
+  created_at: string;
+}): CreateConflictItemParams[] {
+  const citationsById = new Map(
+    params.citations.map((citation) => [citation.citation_id, citation]),
+  );
+  return params.report.sensitivity_assessment.flatMap((claim) => {
+    if (claim.level !== "possible_sensitive" && claim.level !== "likely_sensitive") {
+      return [];
+    }
+    const matchedCitationIds = claim.citations.filter((citationId) => {
+      const citation = citationsById.get(citationId);
+      return citation !== undefined && citationSupportsModality(citation, claim.modality);
+    });
+    if (matchedCitationIds.length > 0) return [];
+    return [{
+      conflict_id: `rag:${params.structure.structure_id}:entailment:${claim.modality}`,
+      case_id: params.case_id,
+      structure_id: params.structure.structure_id,
+      category: "claim_evidence" as const,
+      severity: "high" as const,
+      field: `sensitivity_assessment.${claim.modality}`,
+      left_evidence_ids: claim.evidence_ids,
+      right_evidence_ids: claim.citations,
+      description: `敏感性主张 ${claim.modality} 缺少能够支持该治疗方式的 RAG 引文内容或标签。`,
+      resolution: "unresolved" as const,
+      blocks: ["draft_report", "final_report"] as const,
+      created_at: params.created_at,
+    }];
+  });
+}
+
+function citationSupportsModality(
+  citation: KnowledgeCitation,
+  modality: AssessmentReportJson["sensitivity_assessment"][number]["modality"],
+): boolean {
+  const terms: Record<typeof modality, RegExp> = {
+    radiotherapy: /放疗|radiotherap|radiation/i,
+    platinum_chemo: /铂类|顺铂|卡铂|platinum|chemotherap|化疗/i,
+    immunotherapy: /免疫治疗|免疫检查点|pd-?1|pd-?l1|immunotherap/i,
+    targeted_therapy: /靶向治疗|egfr|ntrk|targeted therap/i,
+  };
+  return terms[modality].test([
+    citation.text_chunk,
+    citation.source_title,
+    ...citation.structured_tags,
+  ].join("\n"));
 }

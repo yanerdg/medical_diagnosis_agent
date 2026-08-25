@@ -29,7 +29,9 @@ export type AssessmentNodeName =
   | "react_plan"
   | "react_act"
   | "react_observe"
-  | "react_decide";
+  | "react_decide"
+  | "verifier_rag_entailment"
+  | "verifier_final_evidence";
 
 export type AssessmentGraphTerminal = "completed" | "paused" | "failed";
 
