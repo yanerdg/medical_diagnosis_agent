@@ -248,7 +248,7 @@ verifier_chain
 - `required_information_check`：生成缺失项、临床用途、阻断等级和可追问性。
 - `deterministic_rule_trace`：执行病理、红旗、耐受性、时间时效等规则并保存 trace。
 - `preflight_conflict_check`：草稿前检查病例事实、已有证据和已检索 RAG；阻断性冲突进入追问，不适用引用在生成草稿前剔除。
-- `final_conflict_summary`：草稿后汇总 RAG 蕴含、主张—证据、事实可回查性和所有最终报告冲突。
+- `final_conflict_summary`：草稿后汇总 RAG 蕴含、主张—证据、事实可回查性、带日期检查的时效性和所有最终报告冲突。
 - `clarification_interrupt`：保存结构化问题并暂停；不在暂停状态绕过证据缺口。
 - `verifier_chain`：验证最终主张与病例证据、RAG 引用、冲突状态是否一致。
 

@@ -158,6 +158,47 @@ export function detectClinicalFactEvidenceIntegrityConflicts(params: {
   });
 }
 
+const MAX_LAB_EVIDENCE_AGE_DAYS = 30;
+
+export function detectTemporalEvidenceConflicts(params: {
+  case_id: string;
+  structure: SpecialtyStructure;
+  facts: ClinicalFact[];
+  assertions: EvidenceAssertion[];
+  now: string;
+  created_at: string;
+}): CreateConflictItemParams[] {
+  const assertionsById = new Map(
+    params.assertions.map((assertion) => [assertion.assertion_id, assertion]),
+  );
+  const cutoff = Date.parse(params.now) - MAX_LAB_EVIDENCE_AGE_DAYS * 24 * 60 * 60 * 1000;
+  return params.facts.flatMap((fact) => {
+    if (fact.domain !== "labs") return [];
+    const datedAssertions = fact.evidence_ids
+      .map((evidenceId) => assertionsById.get(evidenceId))
+      .filter((assertion): assertion is EvidenceAssertion => assertion?.observed_at !== undefined);
+    if (datedAssertions.length === 0) return [];
+    const newestObservedAt = Math.max(
+      ...datedAssertions.map((assertion) => Date.parse(assertion.observed_at!)),
+    );
+    if (newestObservedAt >= cutoff) return [];
+    return [{
+      conflict_id: `${params.structure.structure_id}:temporal:${fact.fact_key}`,
+      case_id: params.case_id,
+      structure_id: params.structure.structure_id,
+      category: "temporal" as const,
+      severity: "high" as const,
+      field: fact.fact_key,
+      left_evidence_ids: fact.evidence_ids,
+      right_evidence_ids: datedAssertions.map((assertion) => assertion.assertion_id),
+      description: `用于 ${fact.fact_key} 的最新带日期证据已超过 ${MAX_LAB_EVIDENCE_AGE_DAYS} 天，不能支撑当前耐受性结论。`,
+      resolution: "unresolved" as const,
+      blocks: ["final_report"] as const,
+      created_at: params.created_at,
+    }];
+  });
+}
+
 function citationSupportsModality(
   citation: KnowledgeCitation,
   modality: AssessmentReportJson["sensitivity_assessment"][number]["modality"],

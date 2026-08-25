@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SpecialtyStructure } from "@/domain/schemas";
 import type { KnowledgeCitation } from "@/server/kb/search";
-import { detectClinicalFactEvidenceIntegrityConflicts, detectRagCitationConflicts, detectRagClaimEntailmentConflicts } from "./conflict-detection";
+import { detectClinicalFactEvidenceIntegrityConflicts, detectRagCitationConflicts, detectRagClaimEntailmentConflicts, detectTemporalEvidenceConflicts } from "./conflict-detection";
 
 const createdAt = "2026-08-23T00:00:00.000Z";
 
@@ -65,6 +65,23 @@ it("flags a clinical fact whose evidence identifier cannot be traced", () => {
   expect(conflicts).toEqual([expect.objectContaining({
     severity: "high", blocks: ["final_report"], right_evidence_ids: ["missing-evidence"],
   })]);
+});
+
+it("flags dated laboratory evidence that is too old for a current conclusion", () => {
+  const conflicts = detectTemporalEvidenceConflicts({
+    case_id: "case-rag-conflict", structure: structure(), now: "2026-08-25T00:00:00.000Z", created_at: createdAt,
+    assertions: [{
+      assertion_id: "lab-old", case_id: "case-rag-conflict", domain: "labs", assertion_key: "labs.ecog",
+      value: 1, polarity: "present", source_type: "signed_report", source_ref: "input-lab",
+      observed_at: "2026-06-01T00:00:00.000Z", created_at: createdAt,
+    }],
+    facts: [{
+      fact_id: "fact-lab", case_id: "case-rag-conflict", structure_id: "structure-rag-conflict",
+      domain: "labs", fact_key: "labs.ecog", value: 1, status: "reported", evidence_ids: ["lab-old"],
+      source_priority: 70, observed_at: "2026-06-01T00:00:00.000Z", created_at: createdAt, updated_at: createdAt,
+    }],
+  });
+  expect(conflicts).toEqual([expect.objectContaining({ category: "temporal", severity: "high" })]);
 });
 
 function structure(): SpecialtyStructure {

@@ -19,6 +19,7 @@ import {
   ClinicalContextManager,
   type CreateConflictItemParams,
   detectClinicalFactEvidenceIntegrityConflicts,
+  detectTemporalEvidenceConflicts,
   detectRagClaimEntailmentConflicts,
   detectRagCitationConflicts,
   type ConflictItem,
@@ -940,11 +941,21 @@ async function finalConflictSummaryNode(
     assertions: runtime.repository.listEvidenceAssertions(state.case_id),
     created_at: runtime.now(),
   });
+  const temporalConflicts = detectTemporalEvidenceConflicts({
+    case_id: state.case_id,
+    structure: state.structure,
+    facts: runtime.repository.listClinicalFacts(state.case_id, state.structure.structure_id),
+    assertions: runtime.repository.listEvidenceAssertions(state.case_id),
+    now: runtime.now(),
+    created_at: runtime.now(),
+  });
   runtime.repository.saveClinicalConflicts(integrityConflicts);
+  runtime.repository.saveClinicalConflicts(temporalConflicts);
   const finalBlockingConflicts = [
     ...contextBundle.unresolved_conflicts,
     ...integrityConflicts,
     ...entailmentConflicts,
+    ...temporalConflicts,
   ].filter(
     (conflict) => conflict.blocks.includes("final_report") && conflict.severity !== "low",
   );
@@ -966,6 +977,7 @@ async function finalConflictSummaryNode(
     blocking_conflict_ids: finalBlockingConflicts.map((conflict) => conflict.conflict_id),
     evidence_integrity_conflict_ids: integrityConflicts.map((conflict) => conflict.conflict_id),
     rag_entailment_conflict_ids: entailmentConflicts.map((conflict) => conflict.conflict_id),
+    temporal_conflict_ids: temporalConflicts.map((conflict) => conflict.conflict_id),
   });
   return finalizeReportState({
     ...state,
